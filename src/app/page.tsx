@@ -29,14 +29,6 @@ interface Book {
   status: "want_to_read" | "reading" | "read";
 }
 
-interface TechniqueImage {
-  id: number;
-  technique_id: number;
-  filename: string;
-  original_name: string;
-  created_at: string;
-}
-
 interface EntryImage {
   id: number;
   filename: string;
@@ -96,6 +88,9 @@ export default function Home() {
   const [books, setBooks] = useState<Book[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<number | null>(null);
+  // Technique-specific: viewing = detail page, editModal = edit sheet
+  const [viewingTechnique, setViewingTechnique] = useState<number | null>(null);
+  const [editModalTechnique, setEditModalTechnique] = useState<number | null>(null);
 
   const fetchAll = useCallback(() => {
     fetch("/api/techniques").then((r) => r.json()).then(setTechniques);
@@ -112,8 +107,7 @@ export default function Home() {
     setEditing(null);
   }
 
-  // For techniques, editing opens a full detail view
-  const editingTechnique = tab === "techniques" && editing !== null;
+  const isViewingTechnique = tab === "techniques" && viewingTechnique !== null;
 
   return (
     <div className="min-h-screen bg-background">
@@ -127,8 +121,8 @@ export default function Home() {
       </header>
 
       <div className="max-w-4xl mx-auto px-4 py-6">
-        {/* Tabs - hidden when in technique detail view */}
-        {!editingTechnique && (
+        {/* Tabs - hidden when viewing technique detail */}
+        {!isViewingTechnique && (
           <>
             <div className="flex gap-1 mb-6 border-b border-gray-200 dark:border-gray-800">
               {(["techniques", "equipment", "books"] as Tab[]).map((t) => (
@@ -146,7 +140,6 @@ export default function Home() {
               ))}
             </div>
 
-            {/* Add button */}
             <div className="flex justify-end mb-4">
               <button
                 onClick={() => { setShowForm(true); setEditing(null); }}
@@ -160,7 +153,7 @@ export default function Home() {
         )}
 
         {/* --- TECHNIQUES --- */}
-        {tab === "techniques" && !editingTechnique && (
+        {tab === "techniques" && !isViewingTechnique && (
           <>
             {showForm && (
               <TechniqueForm
@@ -170,7 +163,8 @@ export default function Home() {
             )}
             <TechniqueList
               items={techniques}
-              onEdit={(id) => { setEditing(id); setShowForm(false); }}
+              onOpen={(id) => setViewingTechnique(id)}
+              onEdit={(id) => setEditModalTechnique(id)}
               onDelete={(id) => {
                 fetch(`/api/techniques?id=${id}`, { method: "DELETE" }).then(fetchAll);
               }}
@@ -178,13 +172,22 @@ export default function Home() {
           </>
         )}
 
-        {editingTechnique && (
+        {isViewingTechnique && (
           <TechniqueDetail
-            technique={techniques.find((t) => t.id === editing)!}
+            technique={techniques.find((t) => t.id === viewingTechnique)!}
             allBooks={books}
             allEquipment={equipment}
-            onSave={() => { closeForm(); fetchAll(); }}
-            onCancel={closeForm}
+            onBack={() => setViewingTechnique(null)}
+            onEdit={() => setEditModalTechnique(viewingTechnique)}
+          />
+        )}
+
+        {/* Edit technique modal */}
+        {editModalTechnique !== null && (
+          <EditTechniqueModal
+            technique={techniques.find((t) => t.id === editModalTechnique)!}
+            onSave={() => { setEditModalTechnique(null); fetchAll(); }}
+            onClose={() => setEditModalTechnique(null)}
           />
         )}
 
@@ -244,30 +247,103 @@ export default function Home() {
 }
 
 /* ================================================================
-   TECHNIQUE DETAIL VIEW — full editing with links & images
+   EDIT TECHNIQUE MODAL — slide-up sheet
    ================================================================ */
 
-function TechniqueDetail({
+function EditTechniqueModal({
   technique,
-  allBooks,
-  allEquipment,
   onSave,
-  onCancel,
+  onClose,
 }: {
   technique: Technique;
-  allBooks: Book[];
-  allEquipment: Equipment[];
   onSave: () => void;
-  onCancel: () => void;
+  onClose: () => void;
 }) {
   const [name, setName] = useState(technique.name);
   const [description, setDescription] = useState(technique.description);
   const [difficulty, setDifficulty] = useState(technique.difficulty);
   const [status, setStatus] = useState(technique.status);
 
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    await fetch("/api/techniques", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: technique.id, name, description, difficulty, status }),
+    });
+    onSave();
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center" onClick={onClose}>
+      {/* Backdrop */}
+      <div className="fixed inset-0 bg-black/40" />
+      {/* Sheet */}
+      <div
+        className="relative w-full sm:max-w-lg bg-background border border-gray-200 dark:border-gray-700 rounded-t-2xl sm:rounded-2xl p-6 space-y-4 max-h-[90vh] overflow-y-auto"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between">
+          <h2 className="font-semibold text-lg">Edit Technique</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-foreground text-xl leading-none">&times;</button>
+        </div>
+        <form onSubmit={submit} className="space-y-3">
+          <input className={inputClass} placeholder="Technique name" value={name} onChange={(e) => setName(e.target.value)} required />
+          <textarea className={inputClass} placeholder="Description" value={description} onChange={(e) => setDescription(e.target.value)} rows={2} />
+          <div className="flex gap-3">
+            <select className={inputClass + " !w-auto"} value={difficulty} onChange={(e) => setDifficulty(e.target.value as Technique["difficulty"])}>
+              <option value="beginner">Beginner</option>
+              <option value="intermediate">Intermediate</option>
+              <option value="advanced">Advanced</option>
+            </select>
+            <select className={inputClass + " !w-auto"} value={status} onChange={(e) => setStatus(e.target.value as Technique["status"])}>
+              <option value="want_to_learn">Want to Learn</option>
+              <option value="learning">Learning</option>
+              <option value="mastered">Mastered</option>
+            </select>
+          </div>
+          <div className="flex gap-2 pt-2">
+            <button type="submit" className={btnPrimary}>Save</button>
+            <button type="button" onClick={onClose} className={btnSecondary}>Cancel</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+/* ================================================================
+   TECHNIQUE DETAIL — journal + links (no edit form)
+   ================================================================ */
+
+type DetailTab = "journal" | "books" | "equipment" | "images";
+
+interface TechniqueImage {
+  id: number;
+  filename: string;
+  original_name: string;
+  url: string;
+}
+
+function TechniqueDetail({
+  technique,
+  allBooks,
+  allEquipment,
+  onBack,
+  onEdit,
+}: {
+  technique: Technique;
+  allBooks: Book[];
+  allEquipment: Equipment[];
+  onBack: () => void;
+  onEdit: () => void;
+}) {
+  const [detailTab, setDetailTab] = useState<DetailTab>("journal");
   const [linkedBooks, setLinkedBooks] = useState<Book[]>([]);
   const [linkedEquipment, setLinkedEquipment] = useState<Equipment[]>([]);
   const [entries, setEntries] = useState<Entry[]>([]);
+  const [images, setImages] = useState<TechniqueImage[]>([]);
+  const imageInputRef = useRef<HTMLInputElement>(null);
 
   const fetchLinks = useCallback(() => {
     fetch(`/api/techniques/links?techniqueId=${technique.id}`)
@@ -284,20 +360,17 @@ function TechniqueDetail({
       .then(setEntries);
   }, [technique.id]);
 
+  const fetchImages = useCallback(() => {
+    fetch(`/api/techniques/images?techniqueId=${technique.id}`)
+      .then((r) => r.json())
+      .then(setImages);
+  }, [technique.id]);
+
   useEffect(() => {
     fetchLinks();
     fetchEntries();
-  }, [fetchLinks, fetchEntries]);
-
-  async function saveDetails(e: React.FormEvent) {
-    e.preventDefault();
-    await fetch("/api/techniques", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: technique.id, name, description, difficulty, status }),
-    });
-    onSave();
-  }
+    fetchImages();
+  }, [fetchLinks, fetchEntries, fetchImages]);
 
   async function linkItem(type: "book" | "equipment", targetId: number) {
     await fetch("/api/techniques/links", {
@@ -321,63 +394,108 @@ function TechniqueDetail({
     fetchEntries();
   }
 
+  async function uploadImage(file: File) {
+    const formData = new FormData();
+    formData.append("techniqueId", String(technique.id));
+    formData.append("file", file);
+    await fetch("/api/techniques/images", { method: "POST", body: formData });
+    fetchImages();
+  }
+
+  async function deleteImage(imageId: number) {
+    await fetch(`/api/techniques/images?id=${imageId}`, { method: "DELETE" });
+    fetchImages();
+  }
+
   const unlinkedBooks = allBooks.filter((b) => !linkedBooks.some((lb) => lb.id === b.id));
   const unlinkedEquipment = allEquipment.filter(
     (eq) => !linkedEquipment.some((le) => le.id === eq.id)
   );
 
   return (
-    <div className="space-y-8">
-      {/* Back button */}
-      <button onClick={onCancel} className="text-sm text-gray-500 hover:text-foreground flex items-center gap-1">
-        &larr; Back to list
-      </button>
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <button onClick={onBack} className="text-sm text-gray-500 hover:text-foreground">
+          &larr; Back
+        </button>
+        <button onClick={onEdit} className="text-xs px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded-md text-gray-500 hover:text-foreground hover:border-gray-400">
+          Edit
+        </button>
+      </div>
 
-      {/* Details form */}
-      <form onSubmit={saveDetails} className="p-4 border border-gray-200 dark:border-gray-700 rounded-lg space-y-3">
-        <h2 className="font-semibold text-lg">Edit Technique</h2>
-        <input className={inputClass} placeholder="Technique name" value={name} onChange={(e) => setName(e.target.value)} required />
-        <textarea className={inputClass} placeholder="Description" value={description} onChange={(e) => setDescription(e.target.value)} rows={2} />
-        <div className="flex gap-3">
-          <select className={inputClass + " !w-auto"} value={difficulty} onChange={(e) => setDifficulty(e.target.value as Technique["difficulty"])}>
-            <option value="beginner">Beginner</option>
-            <option value="intermediate">Intermediate</option>
-            <option value="advanced">Advanced</option>
-          </select>
-          <select className={inputClass + " !w-auto"} value={status} onChange={(e) => setStatus(e.target.value as Technique["status"])}>
-            <option value="want_to_learn">Want to Learn</option>
-            <option value="learning">Learning</option>
-            <option value="mastered">Mastered</option>
-          </select>
-        </div>
-        <div className="flex gap-2">
-          <button type="submit" className={btnPrimary}>Save</button>
-          <button type="button" onClick={onCancel} className={btnSecondary}>Cancel</button>
-        </div>
-      </form>
-
-      {/* Linked Books */}
-      <div className="p-4 border border-gray-200 dark:border-gray-700 rounded-lg space-y-3">
-        <h2 className="font-semibold text-lg">Linked Books</h2>
-        {linkedBooks.length === 0 && (
-          <p className="text-sm text-gray-400">No books linked yet.</p>
+      <div>
+        <h2 className="text-xl font-bold">{technique.name}</h2>
+        {technique.description && (
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{technique.description}</p>
         )}
-        <div className="space-y-2">
-          {linkedBooks.map((b) => (
-            <div key={b.id} className="flex items-center justify-between py-1.5 px-3 bg-gray-50 dark:bg-gray-800 rounded">
-              <span className="text-sm">
-                {b.title} {b.author && <span className="text-gray-400">by {b.author}</span>}
-              </span>
-              <button onClick={() => unlinkItem("book", b.id)} className="text-xs text-red-500 hover:text-red-700">
-                Unlink
-              </button>
-            </div>
-          ))}
+        <div className="flex gap-2 mt-2">
+          <span className={`text-xs px-2 py-0.5 rounded-full ${DIFFICULTY_COLORS[technique.difficulty]}`}>
+            {formatLabel(technique.difficulty)}
+          </span>
+          <span className={`text-xs px-2 py-0.5 rounded-full ${STATUS_COLORS[technique.status]}`}>
+            {formatLabel(technique.status)}
+          </span>
         </div>
-        {unlinkedBooks.length > 0 && (
-          <div className="flex gap-2 items-center pt-2">
+      </div>
+
+      {/* Detail tabs */}
+      <div className="flex gap-1 border-b border-gray-200 dark:border-gray-800">
+        {(["journal", "books", "equipment", "images"] as DetailTab[]).map((t) => (
+          <button
+            key={t}
+            onClick={() => setDetailTab(t)}
+            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+              detailTab === t
+                ? "border-foreground text-foreground"
+                : "border-transparent text-gray-500 hover:text-foreground"
+            }`}
+          >
+            {formatLabel(t)}
+          </button>
+        ))}
+      </div>
+
+      {/* JOURNAL TAB */}
+      {detailTab === "journal" && (
+        <div className="space-y-4">
+          <NewEntryForm
+            techniqueId={technique.id}
+            allBooks={allBooks}
+            allEquipment={allEquipment}
+            onCreated={fetchEntries}
+          />
+          {entries.length === 0 && (
+            <p className="text-sm text-gray-400 text-center py-6">No journal entries yet. Add your first one above.</p>
+          )}
+          <div className="space-y-4">
+            {entries.map((entry) => (
+              <EntryCard key={entry.id} entry={entry} onDelete={() => deleteEntry(entry.id)} />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* BOOKS TAB */}
+      {detailTab === "books" && (
+        <div className="space-y-3">
+          {linkedBooks.length === 0 && (
+            <p className="text-sm text-gray-400">No books linked yet.</p>
+          )}
+          <div className="space-y-2">
+            {linkedBooks.map((b) => (
+              <div key={b.id} className="flex items-center justify-between py-2 px-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                <span className="text-sm">
+                  {b.title} {b.author && <span className="text-gray-400">by {b.author}</span>}
+                </span>
+                <button onClick={() => unlinkItem("book", b.id)} className="text-xs text-red-500 hover:text-red-700">
+                  Unlink
+                </button>
+              </div>
+            ))}
+          </div>
+          {unlinkedBooks.length > 0 && (
             <select
-              id="link-book-select"
               className={inputClass + " !w-auto"}
               defaultValue=""
               onChange={(e) => {
@@ -387,35 +505,33 @@ function TechniqueDetail({
                 }
               }}
             >
-              <option value="" disabled>Add a book...</option>
+              <option value="" disabled>Link a book...</option>
               {unlinkedBooks.map((b) => (
                 <option key={b.id} value={b.id}>{b.title}</option>
               ))}
             </select>
-          </div>
-        )}
-      </div>
-
-      {/* Linked Equipment */}
-      <div className="p-4 border border-gray-200 dark:border-gray-700 rounded-lg space-y-3">
-        <h2 className="font-semibold text-lg">Linked Equipment</h2>
-        {linkedEquipment.length === 0 && (
-          <p className="text-sm text-gray-400">No equipment linked yet.</p>
-        )}
-        <div className="space-y-2">
-          {linkedEquipment.map((eq) => (
-            <div key={eq.id} className="flex items-center justify-between py-1.5 px-3 bg-gray-50 dark:bg-gray-800 rounded">
-              <span className="text-sm">{eq.name}</span>
-              <button onClick={() => unlinkItem("equipment", eq.id)} className="text-xs text-red-500 hover:text-red-700">
-                Unlink
-              </button>
-            </div>
-          ))}
+          )}
         </div>
-        {unlinkedEquipment.length > 0 && (
-          <div className="flex gap-2 items-center pt-2">
+      )}
+
+      {/* EQUIPMENT TAB */}
+      {detailTab === "equipment" && (
+        <div className="space-y-3">
+          {linkedEquipment.length === 0 && (
+            <p className="text-sm text-gray-400">No equipment linked yet.</p>
+          )}
+          <div className="space-y-2">
+            {linkedEquipment.map((eq) => (
+              <div key={eq.id} className="flex items-center justify-between py-2 px-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                <span className="text-sm">{eq.name}</span>
+                <button onClick={() => unlinkItem("equipment", eq.id)} className="text-xs text-red-500 hover:text-red-700">
+                  Unlink
+                </button>
+              </div>
+            ))}
+          </div>
+          {unlinkedEquipment.length > 0 && (
             <select
-              id="link-equipment-select"
               className={inputClass + " !w-auto"}
               defaultValue=""
               onChange={(e) => {
@@ -425,33 +541,61 @@ function TechniqueDetail({
                 }
               }}
             >
-              <option value="" disabled>Add equipment...</option>
+              <option value="" disabled>Link equipment...</option>
               {unlinkedEquipment.map((eq) => (
                 <option key={eq.id} value={eq.id}>{eq.name}</option>
               ))}
             </select>
-          </div>
-        )}
-      </div>
-
-      {/* Journal */}
-      <div className="space-y-4">
-        <h2 className="font-semibold text-lg">Journal</h2>
-        <NewEntryForm
-          techniqueId={technique.id}
-          allBooks={allBooks}
-          allEquipment={allEquipment}
-          onCreated={fetchEntries}
-        />
-        {entries.length === 0 && (
-          <p className="text-sm text-gray-400 text-center py-6">No journal entries yet. Add your first one above.</p>
-        )}
-        <div className="space-y-4">
-          {entries.map((entry) => (
-            <EntryCard key={entry.id} entry={entry} onDelete={() => deleteEntry(entry.id)} />
-          ))}
+          )}
         </div>
-      </div>
+      )}
+
+      {/* IMAGES TAB */}
+      {detailTab === "images" && (
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            {images.map((img) => (
+              <div key={img.id} className="relative group">
+                <img
+                  src={img.url}
+                  alt={img.original_name}
+                  className="w-full h-40 object-cover rounded-lg border border-gray-200 dark:border-gray-700"
+                />
+                <button
+                  onClick={() => deleteImage(img.id)}
+                  className="absolute top-2 right-2 w-6 h-6 bg-red-500 text-white rounded-full text-xs opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"
+                >
+                  X
+                </button>
+                <p className="text-xs text-gray-400 mt-1 truncate">{img.original_name}</p>
+              </div>
+            ))}
+          </div>
+          {images.length === 0 && (
+            <p className="text-sm text-gray-400 text-center py-6">No images yet.</p>
+          )}
+          <input
+            ref={imageInputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) {
+                uploadImage(file);
+                e.target.value = "";
+              }
+            }}
+          />
+          <button
+            type="button"
+            onClick={() => imageInputRef.current?.click()}
+            className={btnSecondary}
+          >
+            Upload Image
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -680,7 +824,7 @@ function EntryCard({ entry, onDelete }: { entry: Entry; onDelete: () => void }) 
 }
 
 /* ================================================================
-   TECHNIQUE LIST & FORM (for adding new — editing goes to detail)
+   TECHNIQUE LIST & FORM
    ================================================================ */
 
 function TechniqueForm({ onDone, onCancel }: { onDone: () => void; onCancel: () => void }) {
@@ -725,10 +869,12 @@ function TechniqueForm({ onDone, onCancel }: { onDone: () => void; onCancel: () 
 
 function TechniqueList({
   items,
+  onOpen,
   onEdit,
   onDelete,
 }: {
   items: Technique[];
+  onOpen: (id: number) => void;
   onEdit: (id: number) => void;
   onDelete: (id: number) => void;
 }) {
@@ -736,7 +882,11 @@ function TechniqueList({
   return (
     <div className="space-y-2">
       {items.map((t) => (
-        <div key={t.id} className="flex items-start justify-between p-4 border border-gray-200 dark:border-gray-700 rounded-lg">
+        <div
+          key={t.id}
+          onClick={() => onOpen(t.id)}
+          className="flex items-start justify-between p-4 border border-gray-200 dark:border-gray-700 rounded-lg cursor-pointer hover:border-gray-400 dark:hover:border-gray-500 transition-colors"
+        >
           <div className="space-y-1">
             <div className="font-medium">{t.name}</div>
             {t.description && <div className="text-sm text-gray-500 dark:text-gray-400">{t.description}</div>}
@@ -750,8 +900,18 @@ function TechniqueList({
             </div>
           </div>
           <div className="flex gap-1 shrink-0 ml-4">
-            <button onClick={() => onEdit(t.id)} className="text-xs px-2 py-1 text-gray-500 hover:text-foreground">Edit</button>
-            <button onClick={() => onDelete(t.id)} className="text-xs px-2 py-1 text-red-500 hover:text-red-700">Delete</button>
+            <button
+              onClick={(e) => { e.stopPropagation(); onEdit(t.id); }}
+              className="text-xs px-2 py-1 text-gray-500 hover:text-foreground"
+            >
+              Edit
+            </button>
+            <button
+              onClick={(e) => { e.stopPropagation(); onDelete(t.id); }}
+              className="text-xs px-2 py-1 text-red-500 hover:text-red-700"
+            >
+              Delete
+            </button>
           </div>
         </div>
       ))}
@@ -760,7 +920,7 @@ function TechniqueList({
 }
 
 /* ================================================================
-   EQUIPMENT — inline editing (form replaces the card)
+   EQUIPMENT — inline editing
    ================================================================ */
 
 function EquipmentForm({
@@ -889,7 +1049,7 @@ function EquipmentList({
 }
 
 /* ================================================================
-   BOOKS — inline editing (form replaces the card)
+   BOOKS — inline editing
    ================================================================ */
 
 function BookForm({
