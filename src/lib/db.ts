@@ -9,7 +9,10 @@ export function db(): Client {
     if (!url || !authToken) {
       throw new Error("Missing TURSO_DATABASE_URL or TURSO_AUTH_TOKEN env vars");
     }
-    client = createClient({ url, authToken });
+    client = createClient({
+      url: url.replace("libsql://", "https://"),
+      authToken,
+    });
   }
   return client;
 }
