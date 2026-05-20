@@ -166,7 +166,9 @@ export default function Home() {
               onOpen={(id) => setViewingTechnique(id)}
               onEdit={(id) => setEditModalTechnique(id)}
               onDelete={(id) => {
-                fetch(`/api/techniques?id=${id}`, { method: "DELETE" }).then(fetchAll);
+                if (confirm("Delete this technique and all its entries?")) {
+                  fetch(`/api/techniques?id=${id}`, { method: "DELETE" }).then(fetchAll);
+                }
               }}
             />
           </>
@@ -207,7 +209,9 @@ export default function Home() {
               onCancelEdit={closeForm}
               onSaveEdit={() => { closeForm(); fetchAll(); }}
               onDelete={(id) => {
-                fetch(`/api/equipment?id=${id}`, { method: "DELETE" }).then(fetchAll);
+                if (confirm("Delete this equipment?")) {
+                  fetch(`/api/equipment?id=${id}`, { method: "DELETE" }).then(fetchAll);
+                }
               }}
               onTogglePurchased={(item) => {
                 fetch("/api/equipment", {
@@ -236,7 +240,9 @@ export default function Home() {
               onCancelEdit={closeForm}
               onSaveEdit={() => { closeForm(); fetchAll(); }}
               onDelete={(id) => {
-                fetch(`/api/books?id=${id}`, { method: "DELETE" }).then(fetchAll);
+                if (confirm("Delete this book?")) {
+                  fetch(`/api/books?id=${id}`, { method: "DELETE" }).then(fetchAll);
+                }
               }}
             />
           </>
@@ -390,6 +396,7 @@ function TechniqueDetail({
   }
 
   async function deleteEntry(entryId: number) {
+    if (!confirm("Delete this journal entry?")) return;
     await fetch(`/api/techniques/entries?id=${entryId}`, { method: "DELETE" });
     fetchEntries();
   }
@@ -403,6 +410,7 @@ function TechniqueDetail({
   }
 
   async function deleteImage(imageId: number) {
+    if (!confirm("Delete this image?")) return;
     await fetch(`/api/techniques/images?id=${imageId}`, { method: "DELETE" });
     fetchImages();
   }
@@ -470,7 +478,7 @@ function TechniqueDetail({
           )}
           <div className="space-y-4">
             {entries.map((entry) => (
-              <EntryCard key={entry.id} entry={entry} onDelete={() => deleteEntry(entry.id)} />
+              <EntryCard key={entry.id} entry={entry} onDelete={() => deleteEntry(entry.id)} onUpdated={fetchEntries} />
             ))}
           </div>
         </div>
@@ -765,7 +773,10 @@ function NewEntryForm({
 
 /* ---- Entry Card ---- */
 
-function EntryCard({ entry, onDelete }: { entry: Entry; onDelete: () => void }) {
+function EntryCard({ entry, onDelete, onUpdated }: { entry: Entry; onDelete: () => void; onUpdated: () => void }) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+
   const date = new Date(entry.created_at + "Z");
   const dateStr = date.toLocaleDateString("en-US", {
     year: "numeric",
@@ -774,6 +785,24 @@ function EntryCard({ entry, onDelete }: { entry: Entry; onDelete: () => void }) 
     hour: "2-digit",
     minute: "2-digit",
   });
+
+  async function attachImages(files: FileList) {
+    setUploading(true);
+    const formData = new FormData();
+    formData.append("entryId", String(entry.id));
+    for (const file of Array.from(files)) {
+      formData.append("files", file);
+    }
+    await fetch("/api/techniques/entries/images", { method: "POST", body: formData });
+    setUploading(false);
+    onUpdated();
+  }
+
+  async function removeImage(imageId: number) {
+    if (!confirm("Delete this image?")) return;
+    await fetch(`/api/techniques/entries/images?id=${imageId}`, { method: "DELETE" });
+    onUpdated();
+  }
 
   return (
     <div className="p-4 border border-gray-200 dark:border-gray-700 rounded-lg space-y-3">
@@ -789,12 +818,19 @@ function EntryCard({ entry, onDelete }: { entry: Entry; onDelete: () => void }) 
       {entry.images.length > 0 && (
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
           {entry.images.map((img) => (
-            <img
-              key={img.id}
-              src={img.url}
-              alt={img.original_name}
-              className="w-full h-40 object-cover rounded-lg border border-gray-200 dark:border-gray-700"
-            />
+            <div key={img.id} className="relative group">
+              <img
+                src={img.url}
+                alt={img.original_name}
+                className="w-full h-40 object-cover rounded-lg border border-gray-200 dark:border-gray-700"
+              />
+              <button
+                onClick={() => removeImage(img.id)}
+                className="absolute top-2 right-2 w-6 h-6 bg-red-500 text-white rounded-full text-xs opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"
+              >
+                X
+              </button>
+            </div>
           ))}
         </div>
       )}
@@ -819,6 +855,31 @@ function EntryCard({ entry, onDelete }: { entry: Entry; onDelete: () => void }) 
           ))}
         </div>
       )}
+
+      {/* Attach images to existing entry */}
+      <div>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          multiple
+          className="hidden"
+          onChange={(e) => {
+            if (e.target.files && e.target.files.length > 0) {
+              attachImages(e.target.files);
+              e.target.value = "";
+            }
+          }}
+        />
+        <button
+          type="button"
+          disabled={uploading}
+          onClick={() => fileInputRef.current?.click()}
+          className="text-xs px-2 py-1 text-gray-500 hover:text-foreground border border-gray-300 dark:border-gray-600 rounded"
+        >
+          {uploading ? "Uploading..." : "Attach Images"}
+        </button>
+      </div>
     </div>
   );
 }
