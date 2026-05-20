@@ -7,7 +7,7 @@ export async function GET(request: NextRequest) {
   if (!techniqueId) {
     return Response.json({ error: "techniqueId is required" }, { status: 400 });
   }
-  const client = await db();
+  const client = db();
   const books = await client.execute({
     sql: `SELECT b.* FROM books b
           JOIN technique_books tb ON tb.book_id = b.id
@@ -29,7 +29,7 @@ export async function POST(request: NextRequest) {
   if (!techniqueId || !type || !targetId) {
     return Response.json({ error: "techniqueId, type, and targetId are required" }, { status: 400 });
   }
-  const client = await db();
+  const client = db();
   if (type === "book") {
     await client.execute({
       sql: "INSERT OR IGNORE INTO technique_books (technique_id, book_id) VALUES (?, ?)",
@@ -54,7 +54,7 @@ export async function DELETE(request: NextRequest) {
   if (!techniqueId || !type || !targetId) {
     return Response.json({ error: "techniqueId, type, and targetId are required" }, { status: 400 });
   }
-  const client = await db();
+  const client = db();
   if (type === "book") {
     await client.execute({
       sql: "DELETE FROM technique_books WHERE technique_id = ? AND book_id = ?",

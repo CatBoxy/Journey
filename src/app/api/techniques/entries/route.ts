@@ -8,7 +8,7 @@ export async function GET(request: NextRequest) {
   if (!techniqueId) {
     return Response.json({ error: "techniqueId is required" }, { status: 400 });
   }
-  const client = await db();
+  const client = db();
   const entriesResult = await client.execute({
     sql: "SELECT * FROM technique_entries WHERE technique_id = ? ORDER BY created_at DESC",
     args: [techniqueId],
@@ -55,7 +55,7 @@ export async function POST(request: NextRequest) {
     return Response.json({ error: "techniqueId is required" }, { status: 400 });
   }
 
-  const client = await db();
+  const client = db();
 
   const result = await client.execute({
     sql: "INSERT INTO technique_entries (technique_id, text) VALUES (?, ?)",
@@ -105,7 +105,7 @@ export async function DELETE(request: NextRequest) {
   if (!id) {
     return Response.json({ error: "id is required" }, { status: 400 });
   }
-  const client = await db();
+  const client = db();
 
   // Delete images from Cloudinary
   const images = await client.execute({

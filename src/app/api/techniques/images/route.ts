@@ -8,7 +8,7 @@ export async function GET(request: NextRequest) {
   if (!techniqueId) {
     return Response.json({ error: "techniqueId is required" }, { status: 400 });
   }
-  const client = await db();
+  const client = db();
   const result = await client.execute({
     sql: "SELECT * FROM technique_images WHERE technique_id = ? ORDER BY created_at DESC",
     args: [techniqueId],
@@ -27,7 +27,7 @@ export async function POST(request: NextRequest) {
   const buffer = Buffer.from(await file.arrayBuffer());
   const { public_id, url } = await uploadImage(buffer, "journey/techniques");
 
-  const client = await db();
+  const client = db();
   const result = await client.execute({
     sql: "INSERT INTO technique_images (technique_id, filename, original_name, url) VALUES (?, ?, ?, ?)",
     args: [techniqueId, public_id, file.name, url],
@@ -42,7 +42,7 @@ export async function DELETE(request: NextRequest) {
   if (!id) {
     return Response.json({ error: "id is required" }, { status: 400 });
   }
-  const client = await db();
+  const client = db();
   const result = await client.execute({ sql: "SELECT filename FROM technique_images WHERE id = ?", args: [id] });
   if (result.rows.length > 0) {
     await deleteImage(result.rows[0].filename as string);
