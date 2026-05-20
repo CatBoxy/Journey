@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 
-type Tab = "techniques" | "equipment" | "books";
+type Tab = "feed" | "techniques" | "equipment" | "books";
 
 interface Technique {
   id: number;
@@ -46,6 +46,10 @@ interface Entry {
   equipment: Equipment[];
 }
 
+interface FeedEntry extends Entry {
+  technique_name: string;
+}
+
 const DIFFICULTY_COLORS = {
   beginner: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
   intermediate: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200",
@@ -82,10 +86,11 @@ const btnSecondary =
   "px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md text-sm hover:bg-gray-50 dark:hover:bg-gray-800";
 
 export default function Home() {
-  const [tab, setTab] = useState<Tab>("techniques");
+  const [tab, setTab] = useState<Tab>("feed");
   const [techniques, setTechniques] = useState<Technique[]>([]);
   const [equipment, setEquipment] = useState<Equipment[]>([]);
   const [books, setBooks] = useState<Book[]>([]);
+  const [feedEntries, setFeedEntries] = useState<FeedEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<number | null>(null);
@@ -95,14 +100,16 @@ export default function Home() {
   const { confirm, dialog: confirmDialog } = useConfirm();
 
   const fetchAll = useCallback(async () => {
-    const [t, e, b] = await Promise.all([
+    const [t, e, b, f] = await Promise.all([
       fetch("/api/techniques").then((r) => r.json()),
       fetch("/api/equipment").then((r) => r.json()),
       fetch("/api/books").then((r) => r.json()),
+      fetch("/api/entries").then((r) => r.json()),
     ]);
     setTechniques(t);
     setEquipment(e);
     setBooks(b);
+    setFeedEntries(f);
     setLoading(false);
   }, []);
 
@@ -133,7 +140,7 @@ export default function Home() {
         {!isViewingTechnique && (
           <>
             <div className="flex gap-1 mb-6 border-b border-gray-200 dark:border-gray-800">
-              {(["techniques", "equipment", "books"] as Tab[]).map((t) => (
+              {(["feed", "techniques", "equipment", "books"] as Tab[]).map((t) => (
                 <button
                   key={t}
                   onClick={() => { setTab(t); closeForm(); }}
@@ -148,16 +155,45 @@ export default function Home() {
               ))}
             </div>
 
-            <div className="flex justify-end mb-4">
-              <button
-                onClick={() => { setShowForm(true); setEditing(null); }}
-                className="px-4 py-2 bg-foreground text-background rounded-lg text-sm font-medium hover:opacity-90 transition-opacity"
-              >
-                + Add{" "}
-                {tab === "techniques" ? "Technique" : tab === "equipment" ? "Equipment" : "Book"}
-              </button>
-            </div>
+            {tab !== "feed" && (
+              <div className="flex justify-end mb-4">
+                <button
+                  onClick={() => { setShowForm(true); setEditing(null); }}
+                  className="px-4 py-2 bg-foreground text-background rounded-lg text-sm font-medium hover:opacity-90 transition-opacity"
+                >
+                  + Add{" "}
+                  {tab === "techniques" ? "Technique" : tab === "equipment" ? "Equipment" : "Book"}
+                </button>
+              </div>
+            )}
           </>
+        )}
+
+        {/* --- FEED --- */}
+        {tab === "feed" && (
+          loading ? <Spinner /> : (
+            <div className="space-y-4">
+              {feedEntries.length === 0 && (
+                <p className="text-sm text-gray-400 text-center py-12">No journal entries yet. Open a technique and start journaling.</p>
+              )}
+              {feedEntries.map((entry) => (
+                <div key={entry.id} className="space-y-1">
+                  <button
+                    onClick={() => { setTab("techniques"); setViewingTechnique(entry.technique_id as number); }}
+                    className="text-xs font-medium text-gray-500 hover:text-foreground"
+                  >
+                    {entry.technique_name as string}
+                  </button>
+                  <EntryCard entry={entry} onDelete={async () => {
+                    if (await confirm("Delete this journal entry?")) {
+                      await fetch(`/api/techniques/entries?id=${entry.id}`, { method: "DELETE" });
+                      fetchAll();
+                    }
+                  }} onUpdated={fetchAll} />
+                </div>
+              ))}
+            </div>
+          )
         )}
 
         {/* --- TECHNIQUES --- */}
