@@ -41,6 +41,7 @@ interface EntryImage {
   id: number;
   filename: string;
   original_name: string;
+  url: string;
 }
 
 interface Entry {
@@ -646,7 +647,7 @@ function EntryCard({ entry, onDelete }: { entry: Entry; onDelete: () => void }) 
           {entry.images.map((img) => (
             <img
               key={img.id}
-              src={`/api/uploads?file=${encodeURIComponent(img.filename)}`}
+              src={img.url}
               alt={img.original_name}
               className="w-full h-40 object-cover rounded-lg border border-gray-200 dark:border-gray-700"
             />

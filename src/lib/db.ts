@@ -93,6 +93,15 @@ export async function initSchema() {
     )`,
   ];
   await db.batch(statements.map((sql) => ({ sql, args: [] })));
+
+  // Migrations — add url column to image tables (idempotent)
+  for (const table of ["technique_images", "entry_images"]) {
+    try {
+      await db.execute(`ALTER TABLE ${table} ADD COLUMN url TEXT DEFAULT ''`);
+    } catch {
+      // column already exists
+    }
+  }
 }
 
 let schemaReady: Promise<void> | null = null;
