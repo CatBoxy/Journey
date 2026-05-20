@@ -1,9 +1,8 @@
-import { db } from "@/lib/db";
+import { execute } from "@/lib/db";
 import { NextRequest } from "next/server";
 
 export async function GET() {
-  const client = db();
-  const result = await client.execute("SELECT * FROM equipment ORDER BY created_at DESC");
+  const result = await execute("SELECT * FROM equipment ORDER BY created_at DESC");
   return Response.json(result.rows);
 }
 
@@ -13,12 +12,11 @@ export async function POST(request: NextRequest) {
   if (!name) {
     return Response.json({ error: "Name is required" }, { status: 400 });
   }
-  const client = db();
-  const result = await client.execute({
-    sql: "INSERT INTO equipment (name, description, priority, purchased, url) VALUES (?, ?, ?, ?, ?)",
-    args: [name, description || "", priority || "medium", purchased ? 1 : 0, url || ""],
-  });
-  const row = await client.execute({ sql: "SELECT * FROM equipment WHERE id = ?", args: [result.lastInsertRowid!] });
+  const result = await execute(
+    "INSERT INTO equipment (name, description, priority, purchased, url) VALUES (?, ?, ?, ?, ?)",
+    [name, description || "", priority || "medium", purchased ? 1 : 0, url || ""]
+  );
+  const row = await execute("SELECT * FROM equipment WHERE id = ?", [result.lastInsertRowid!]);
   return Response.json(row.rows[0], { status: 201 });
 }
 
@@ -28,12 +26,11 @@ export async function PUT(request: NextRequest) {
   if (!id) {
     return Response.json({ error: "ID is required" }, { status: 400 });
   }
-  const client = db();
-  await client.execute({
-    sql: "UPDATE equipment SET name = ?, description = ?, priority = ?, purchased = ?, url = ? WHERE id = ?",
-    args: [name, description || "", priority || "medium", purchased ? 1 : 0, url || "", id],
-  });
-  const row = await client.execute({ sql: "SELECT * FROM equipment WHERE id = ?", args: [id] });
+  await execute(
+    "UPDATE equipment SET name = ?, description = ?, priority = ?, purchased = ?, url = ? WHERE id = ?",
+    [name, description || "", priority || "medium", purchased ? 1 : 0, url || "", id]
+  );
+  const row = await execute("SELECT * FROM equipment WHERE id = ?", [id]);
   return Response.json(row.rows[0]);
 }
 
@@ -43,7 +40,6 @@ export async function DELETE(request: NextRequest) {
   if (!id) {
     return Response.json({ error: "ID is required" }, { status: 400 });
   }
-  const client = db();
-  await client.execute({ sql: "DELETE FROM equipment WHERE id = ?", args: [id] });
+  await execute("DELETE FROM equipment WHERE id = ?", [id]);
   return Response.json({ ok: true });
 }

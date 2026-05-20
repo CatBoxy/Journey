@@ -1,18 +1,68 @@
-import { createClient, type Client } from "@libsql/client/http";
+const getConfig = () => {
+  const url = process.env.TURSO_DATABASE_URL;
+  const token = process.env.TURSO_AUTH_TOKEN;
+  if (!url || !token) throw new Error("Missing TURSO_DATABASE_URL or TURSO_AUTH_TOKEN");
+  return {
+    apiUrl: `${url.replace("libsql://", "https://")}/v2/pipeline`,
+    token,
+  };
+};
 
-let client: Client | null = null;
+interface Row {
+  [key: string]: unknown;
+}
 
-export function db(): Client {
-  if (!client) {
-    const url = process.env.TURSO_DATABASE_URL;
-    const authToken = process.env.TURSO_AUTH_TOKEN;
-    if (!url || !authToken) {
-      throw new Error("Missing TURSO_DATABASE_URL or TURSO_AUTH_TOKEN env vars");
-    }
-    client = createClient({
-      url: url.replace("libsql://", "https://"),
-      authToken,
-    });
+interface ExecuteResult {
+  rows: Row[];
+  lastInsertRowid: bigint | undefined;
+}
+
+export async function execute(sql: string, args: unknown[] = []): Promise<ExecuteResult> {
+  const { apiUrl, token } = getConfig();
+  const stmtArgs = args.map((a) => {
+    if (a === null || a === undefined) return { type: "null", value: null };
+    if (typeof a === "number") return Number.isInteger(a) ? { type: "integer", value: String(a) } : { type: "float", value: a };
+    if (typeof a === "bigint") return { type: "integer", value: String(a) };
+    return { type: "text", value: String(a) };
+  });
+
+  const res = await fetch(apiUrl, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      requests: [
+        { type: "execute", stmt: { sql, args: stmtArgs } },
+        { type: "close" },
+      ],
+    }),
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Turso error ${res.status}: ${text}`);
   }
-  return client;
+
+  const data = await res.json();
+  const result = data.results[0];
+  if (result.type === "error") {
+    throw new Error(`SQL error: ${result.error.message}`);
+  }
+
+  const { cols, rows: rawRows, last_insert_rowid } = result.response.result;
+  const rows: Row[] = rawRows.map((row: Array<{ type: string; value: string | null }>) => {
+    const obj: Row = {};
+    cols.forEach((col: { name: string }, i: number) => {
+      const cell = row[i];
+      if (cell.type === "null") obj[col.name] = null;
+      else if (cell.type === "integer") obj[col.name] = Number(cell.value);
+      else if (cell.type === "float") obj[col.name] = Number(cell.value);
+      else obj[col.name] = cell.value;
+    });
+    return obj;
+  });
+
+  return {
+    rows,
+    lastInsertRowid: last_insert_rowid != null ? BigInt(last_insert_rowid) : undefined,
+  };
 }
