@@ -1,4 +1,4 @@
-import getDb from "@/lib/db";
+import { db } from "@/lib/db";
 import { NextRequest } from "next/server";
 
 export async function GET(request: NextRequest) {
@@ -7,22 +7,20 @@ export async function GET(request: NextRequest) {
   if (!techniqueId) {
     return Response.json({ error: "techniqueId is required" }, { status: 400 });
   }
-  const db = getDb();
-  const books = db
-    .prepare(
-      `SELECT b.* FROM books b
-       JOIN technique_books tb ON tb.book_id = b.id
-       WHERE tb.technique_id = ?`
-    )
-    .all(techniqueId);
-  const equipment = db
-    .prepare(
-      `SELECT e.* FROM equipment e
-       JOIN technique_equipment te ON te.equipment_id = e.id
-       WHERE te.technique_id = ?`
-    )
-    .all(techniqueId);
-  return Response.json({ books, equipment });
+  const client = await db();
+  const books = await client.execute({
+    sql: `SELECT b.* FROM books b
+          JOIN technique_books tb ON tb.book_id = b.id
+          WHERE tb.technique_id = ?`,
+    args: [techniqueId],
+  });
+  const equipment = await client.execute({
+    sql: `SELECT e.* FROM equipment e
+          JOIN technique_equipment te ON te.equipment_id = e.id
+          WHERE te.technique_id = ?`,
+    args: [techniqueId],
+  });
+  return Response.json({ books: books.rows, equipment: equipment.rows });
 }
 
 export async function POST(request: NextRequest) {
@@ -31,16 +29,17 @@ export async function POST(request: NextRequest) {
   if (!techniqueId || !type || !targetId) {
     return Response.json({ error: "techniqueId, type, and targetId are required" }, { status: 400 });
   }
-  const db = getDb();
+  const client = await db();
   if (type === "book") {
-    db.prepare("INSERT OR IGNORE INTO technique_books (technique_id, book_id) VALUES (?, ?)").run(
-      techniqueId,
-      targetId
-    );
+    await client.execute({
+      sql: "INSERT OR IGNORE INTO technique_books (technique_id, book_id) VALUES (?, ?)",
+      args: [techniqueId, targetId],
+    });
   } else if (type === "equipment") {
-    db.prepare(
-      "INSERT OR IGNORE INTO technique_equipment (technique_id, equipment_id) VALUES (?, ?)"
-    ).run(techniqueId, targetId);
+    await client.execute({
+      sql: "INSERT OR IGNORE INTO technique_equipment (technique_id, equipment_id) VALUES (?, ?)",
+      args: [techniqueId, targetId],
+    });
   } else {
     return Response.json({ error: "type must be 'book' or 'equipment'" }, { status: 400 });
   }
@@ -55,17 +54,17 @@ export async function DELETE(request: NextRequest) {
   if (!techniqueId || !type || !targetId) {
     return Response.json({ error: "techniqueId, type, and targetId are required" }, { status: 400 });
   }
-  const db = getDb();
+  const client = await db();
   if (type === "book") {
-    db.prepare("DELETE FROM technique_books WHERE technique_id = ? AND book_id = ?").run(
-      techniqueId,
-      targetId
-    );
+    await client.execute({
+      sql: "DELETE FROM technique_books WHERE technique_id = ? AND book_id = ?",
+      args: [techniqueId, targetId],
+    });
   } else if (type === "equipment") {
-    db.prepare("DELETE FROM technique_equipment WHERE technique_id = ? AND equipment_id = ?").run(
-      techniqueId,
-      targetId
-    );
+    await client.execute({
+      sql: "DELETE FROM technique_equipment WHERE technique_id = ? AND equipment_id = ?",
+      args: [techniqueId, targetId],
+    });
   }
   return Response.json({ ok: true });
 }

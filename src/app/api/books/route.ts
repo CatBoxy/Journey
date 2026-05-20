@@ -1,10 +1,10 @@
-import getDb from "@/lib/db";
+import { db } from "@/lib/db";
 import { NextRequest } from "next/server";
 
 export async function GET() {
-  const db = getDb();
-  const rows = db.prepare("SELECT * FROM books ORDER BY created_at DESC").all();
-  return Response.json(rows);
+  const client = await db();
+  const result = await client.execute("SELECT * FROM books ORDER BY created_at DESC");
+  return Response.json(result.rows);
 }
 
 export async function POST(request: NextRequest) {
@@ -13,12 +13,13 @@ export async function POST(request: NextRequest) {
   if (!title) {
     return Response.json({ error: "Title is required" }, { status: 400 });
   }
-  const db = getDb();
-  const result = db
-    .prepare("INSERT INTO books (title, author, description, status) VALUES (?, ?, ?, ?)")
-    .run(title, author || "", description || "", status || "want_to_read");
-  const row = db.prepare("SELECT * FROM books WHERE id = ?").get(result.lastInsertRowid);
-  return Response.json(row, { status: 201 });
+  const client = await db();
+  const result = await client.execute({
+    sql: "INSERT INTO books (title, author, description, status) VALUES (?, ?, ?, ?)",
+    args: [title, author || "", description || "", status || "want_to_read"],
+  });
+  const row = await client.execute({ sql: "SELECT * FROM books WHERE id = ?", args: [result.lastInsertRowid!] });
+  return Response.json(row.rows[0], { status: 201 });
 }
 
 export async function PUT(request: NextRequest) {
@@ -27,12 +28,13 @@ export async function PUT(request: NextRequest) {
   if (!id) {
     return Response.json({ error: "ID is required" }, { status: 400 });
   }
-  const db = getDb();
-  db.prepare(
-    "UPDATE books SET title = ?, author = ?, description = ?, status = ? WHERE id = ?"
-  ).run(title, author || "", description || "", status || "want_to_read", id);
-  const row = db.prepare("SELECT * FROM books WHERE id = ?").get(id);
-  return Response.json(row);
+  const client = await db();
+  await client.execute({
+    sql: "UPDATE books SET title = ?, author = ?, description = ?, status = ? WHERE id = ?",
+    args: [title, author || "", description || "", status || "want_to_read", id],
+  });
+  const row = await client.execute({ sql: "SELECT * FROM books WHERE id = ?", args: [id] });
+  return Response.json(row.rows[0]);
 }
 
 export async function DELETE(request: NextRequest) {
@@ -41,7 +43,7 @@ export async function DELETE(request: NextRequest) {
   if (!id) {
     return Response.json({ error: "ID is required" }, { status: 400 });
   }
-  const db = getDb();
-  db.prepare("DELETE FROM books WHERE id = ?").run(id);
+  const client = await db();
+  await client.execute({ sql: "DELETE FROM books WHERE id = ?", args: [id] });
   return Response.json({ ok: true });
 }
