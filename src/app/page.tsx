@@ -86,16 +86,24 @@ export default function Home() {
   const [techniques, setTechniques] = useState<Technique[]>([]);
   const [equipment, setEquipment] = useState<Equipment[]>([]);
   const [books, setBooks] = useState<Book[]>([]);
+  const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<number | null>(null);
   // Technique-specific: viewing = detail page, editModal = edit sheet
   const [viewingTechnique, setViewingTechnique] = useState<number | null>(null);
   const [editModalTechnique, setEditModalTechnique] = useState<number | null>(null);
+  const { confirm, dialog: confirmDialog } = useConfirm();
 
-  const fetchAll = useCallback(() => {
-    fetch("/api/techniques").then((r) => r.json()).then(setTechniques);
-    fetch("/api/equipment").then((r) => r.json()).then(setEquipment);
-    fetch("/api/books").then((r) => r.json()).then(setBooks);
+  const fetchAll = useCallback(async () => {
+    const [t, e, b] = await Promise.all([
+      fetch("/api/techniques").then((r) => r.json()),
+      fetch("/api/equipment").then((r) => r.json()),
+      fetch("/api/books").then((r) => r.json()),
+    ]);
+    setTechniques(t);
+    setEquipment(e);
+    setBooks(b);
+    setLoading(false);
   }, []);
 
   useEffect(() => {
@@ -161,16 +169,17 @@ export default function Home() {
                 onCancel={closeForm}
               />
             )}
-            <TechniqueList
+            {loading ? <Spinner /> : <TechniqueList
               items={techniques}
               onOpen={(id) => setViewingTechnique(id)}
               onEdit={(id) => setEditModalTechnique(id)}
-              onDelete={(id) => {
-                if (confirm("Delete this technique and all its entries?")) {
-                  fetch(`/api/techniques?id=${id}`, { method: "DELETE" }).then(fetchAll);
+              onDelete={async (id) => {
+                if (await confirm("Delete this technique and all its entries?")) {
+                  await fetch(`/api/techniques?id=${id}`, { method: "DELETE" });
+                  fetchAll();
                 }
               }}
-            />
+            />}
           </>
         )}
 
@@ -202,15 +211,16 @@ export default function Home() {
                 onCancel={closeForm}
               />
             )}
-            <EquipmentList
+            {loading ? <Spinner /> : <EquipmentList
               items={equipment}
               editingId={editing}
               onEdit={(id) => { setEditing(id); setShowForm(true); }}
               onCancelEdit={closeForm}
               onSaveEdit={() => { closeForm(); fetchAll(); }}
-              onDelete={(id) => {
-                if (confirm("Delete this equipment?")) {
-                  fetch(`/api/equipment?id=${id}`, { method: "DELETE" }).then(fetchAll);
+              onDelete={async (id) => {
+                if (await confirm("Delete this equipment?")) {
+                  await fetch(`/api/equipment?id=${id}`, { method: "DELETE" });
+                  fetchAll();
                 }
               }}
               onTogglePurchased={(item) => {
@@ -220,7 +230,7 @@ export default function Home() {
                   body: JSON.stringify({ ...item, purchased: item.purchased ? 0 : 1 }),
                 }).then(fetchAll);
               }}
-            />
+            />}
           </>
         )}
 
@@ -233,21 +243,23 @@ export default function Home() {
                 onCancel={closeForm}
               />
             )}
-            <BookList
+            {loading ? <Spinner /> : <BookList
               items={books}
               editingId={editing}
               onEdit={(id) => { setEditing(id); setShowForm(true); }}
               onCancelEdit={closeForm}
               onSaveEdit={() => { closeForm(); fetchAll(); }}
-              onDelete={(id) => {
-                if (confirm("Delete this book?")) {
-                  fetch(`/api/books?id=${id}`, { method: "DELETE" }).then(fetchAll);
+              onDelete={async (id) => {
+                if (await confirm("Delete this book?")) {
+                  await fetch(`/api/books?id=${id}`, { method: "DELETE" });
+                  fetchAll();
                 }
               }}
-            />
+            />}
           </>
         )}
       </div>
+      {confirmDialog()}
     </div>
   );
 }
@@ -269,9 +281,11 @@ function EditTechniqueModal({
   const [description, setDescription] = useState(technique.description);
   const [difficulty, setDifficulty] = useState(technique.difficulty);
   const [status, setStatus] = useState(technique.status);
+  const [saving, setSaving] = useState(false);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
+    setSaving(true);
     await fetch("/api/techniques", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
@@ -282,9 +296,7 @@ function EditTechniqueModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center" onClick={onClose}>
-      {/* Backdrop */}
       <div className="fixed inset-0 bg-black/40" />
-      {/* Sheet */}
       <div
         className="relative w-full sm:max-w-lg bg-background border border-gray-200 dark:border-gray-700 rounded-t-2xl sm:rounded-2xl p-6 space-y-4 max-h-[90vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
@@ -294,23 +306,23 @@ function EditTechniqueModal({
           <button onClick={onClose} className="text-gray-400 hover:text-foreground text-xl leading-none">&times;</button>
         </div>
         <form onSubmit={submit} className="space-y-3">
-          <input className={inputClass} placeholder="Technique name" value={name} onChange={(e) => setName(e.target.value)} required />
-          <textarea className={inputClass} placeholder="Description" value={description} onChange={(e) => setDescription(e.target.value)} rows={2} />
+          <input className={inputClass} placeholder="Technique name" value={name} onChange={(e) => setName(e.target.value)} required disabled={saving} />
+          <textarea className={inputClass} placeholder="Description" value={description} onChange={(e) => setDescription(e.target.value)} rows={2} disabled={saving} />
           <div className="flex gap-3">
-            <select className={inputClass + " !w-auto"} value={difficulty} onChange={(e) => setDifficulty(e.target.value as Technique["difficulty"])}>
+            <select className={inputClass + " !w-auto"} value={difficulty} onChange={(e) => setDifficulty(e.target.value as Technique["difficulty"])} disabled={saving}>
               <option value="beginner">Beginner</option>
               <option value="intermediate">Intermediate</option>
               <option value="advanced">Advanced</option>
             </select>
-            <select className={inputClass + " !w-auto"} value={status} onChange={(e) => setStatus(e.target.value as Technique["status"])}>
+            <select className={inputClass + " !w-auto"} value={status} onChange={(e) => setStatus(e.target.value as Technique["status"])} disabled={saving}>
               <option value="want_to_learn">Want to Learn</option>
               <option value="learning">Learning</option>
               <option value="mastered">Mastered</option>
             </select>
           </div>
           <div className="flex gap-2 pt-2">
-            <button type="submit" className={btnPrimary}>Save</button>
-            <button type="button" onClick={onClose} className={btnSecondary}>Cancel</button>
+            <button type="submit" disabled={saving} className={btnPrimary}>{saving ? "Saving..." : "Save"}</button>
+            <button type="button" onClick={onClose} disabled={saving} className={btnSecondary}>Cancel</button>
           </div>
         </form>
       </div>
@@ -349,10 +361,11 @@ function TechniqueDetail({
   const [linkedEquipment, setLinkedEquipment] = useState<Equipment[]>([]);
   const [entries, setEntries] = useState<Entry[]>([]);
   const [images, setImages] = useState<TechniqueImage[]>([]);
+  const [detailLoading, setDetailLoading] = useState(true);
   const imageInputRef = useRef<HTMLInputElement>(null);
 
   const fetchLinks = useCallback(() => {
-    fetch(`/api/techniques/links?techniqueId=${technique.id}`)
+    return fetch(`/api/techniques/links?techniqueId=${technique.id}`)
       .then((r) => r.json())
       .then((data) => {
         setLinkedBooks(data.books);
@@ -361,21 +374,19 @@ function TechniqueDetail({
   }, [technique.id]);
 
   const fetchEntries = useCallback(() => {
-    fetch(`/api/techniques/entries?techniqueId=${technique.id}`)
+    return fetch(`/api/techniques/entries?techniqueId=${technique.id}`)
       .then((r) => r.json())
       .then(setEntries);
   }, [technique.id]);
 
   const fetchImages = useCallback(() => {
-    fetch(`/api/techniques/images?techniqueId=${technique.id}`)
+    return fetch(`/api/techniques/images?techniqueId=${technique.id}`)
       .then((r) => r.json())
       .then(setImages);
   }, [technique.id]);
 
   useEffect(() => {
-    fetchLinks();
-    fetchEntries();
-    fetchImages();
+    Promise.all([fetchLinks(), fetchEntries(), fetchImages()]).then(() => setDetailLoading(false));
   }, [fetchLinks, fetchEntries, fetchImages]);
 
   async function linkItem(type: "book" | "equipment", targetId: number) {
@@ -395,8 +406,10 @@ function TechniqueDetail({
     fetchLinks();
   }
 
+  const { confirm: confirmDetail, dialog: confirmDetailDialog } = useConfirm();
+
   async function deleteEntry(entryId: number) {
-    if (!confirm("Delete this journal entry?")) return;
+    if (!await confirmDetail("Delete this journal entry?")) return;
     await fetch(`/api/techniques/entries?id=${entryId}`, { method: "DELETE" });
     fetchEntries();
   }
@@ -410,7 +423,7 @@ function TechniqueDetail({
   }
 
   async function deleteImage(imageId: number) {
-    if (!confirm("Delete this image?")) return;
+    if (!await confirmDetail("Delete this image?")) return;
     await fetch(`/api/techniques/images?id=${imageId}`, { method: "DELETE" });
     fetchImages();
   }
@@ -464,6 +477,7 @@ function TechniqueDetail({
         ))}
       </div>
 
+      {detailLoading ? <Spinner /> : <>
       {/* JOURNAL TAB */}
       {detailTab === "journal" && (
         <div className="space-y-4">
@@ -604,6 +618,8 @@ function TechniqueDetail({
           </button>
         </div>
       )}
+      </>}
+      {confirmDetailDialog()}
     </div>
   );
 }
@@ -776,6 +792,10 @@ function NewEntryForm({
 function EntryCard({ entry, onDelete, onUpdated }: { entry: Entry; onDelete: () => void; onUpdated: () => void }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
+  const [editingText, setEditingText] = useState(false);
+  const [text, setText] = useState(entry.text);
+  const [savingText, setSavingText] = useState(false);
+  const { confirm: confirmImg, dialog: confirmImgDialog } = useConfirm();
 
   const date = new Date(entry.created_at + "Z");
   const dateStr = date.toLocaleDateString("en-US", {
@@ -799,8 +819,20 @@ function EntryCard({ entry, onDelete, onUpdated }: { entry: Entry; onDelete: () 
   }
 
   async function removeImage(imageId: number) {
-    if (!confirm("Delete this image?")) return;
+    if (!await confirmImg("Delete this image?")) return;
     await fetch(`/api/techniques/entries/images?id=${imageId}`, { method: "DELETE" });
+    onUpdated();
+  }
+
+  async function saveText() {
+    setSavingText(true);
+    await fetch("/api/techniques/entries/text", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: entry.id, text }),
+    });
+    setSavingText(false);
+    setEditingText(false);
     onUpdated();
   }
 
@@ -808,12 +840,32 @@ function EntryCard({ entry, onDelete, onUpdated }: { entry: Entry; onDelete: () 
     <div className="p-4 border border-gray-200 dark:border-gray-700 rounded-lg space-y-3">
       <div className="flex items-start justify-between">
         <time className="text-xs text-gray-400">{dateStr}</time>
-        <button onClick={onDelete} className="text-xs text-red-500 hover:text-red-700">
-          Delete
-        </button>
+        <div className="flex gap-2">
+          <button onClick={() => setEditingText(!editingText)} className="text-xs text-gray-500 hover:text-foreground">
+            {editingText ? "Cancel" : "Edit"}
+          </button>
+          <button onClick={onDelete} className="text-xs text-red-500 hover:text-red-700">
+            Delete
+          </button>
+        </div>
       </div>
 
-      {entry.text && <p className="text-sm whitespace-pre-wrap">{entry.text}</p>}
+      {editingText ? (
+        <div className="space-y-2">
+          <textarea
+            className={inputClass}
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            rows={3}
+            disabled={savingText}
+          />
+          <button onClick={saveText} disabled={savingText} className={btnPrimary + " text-xs !px-3 !py-1.5"}>
+            {savingText ? "Saving..." : "Save"}
+          </button>
+        </div>
+      ) : (
+        entry.text && <p className="text-sm whitespace-pre-wrap">{entry.text}</p>
+      )}
 
       {entry.images.length > 0 && (
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
@@ -880,6 +932,7 @@ function EntryCard({ entry, onDelete, onUpdated }: { entry: Entry; onDelete: () 
           {uploading ? "Uploading..." : "Attach Images"}
         </button>
       </div>
+      {confirmImgDialog()}
     </div>
   );
 }
@@ -1206,4 +1259,63 @@ function EmptyState({ label }: { label: string }) {
       No {label} yet. Add your first one above.
     </div>
   );
+}
+
+function Spinner({ className }: { className?: string }) {
+  return (
+    <div className={`flex justify-center py-12 ${className || ""}`}>
+      <div className="w-6 h-6 border-2 border-gray-300 dark:border-gray-600 border-t-foreground rounded-full animate-spin" />
+    </div>
+  );
+}
+
+function ConfirmDialog({
+  message,
+  onConfirm,
+  onCancel,
+}: {
+  message: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center" onClick={onCancel}>
+      <div className="fixed inset-0 bg-black/40" />
+      <div
+        className="relative w-full sm:max-w-sm bg-background border border-gray-200 dark:border-gray-700 rounded-t-2xl sm:rounded-2xl p-6 space-y-4"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <p className="text-sm">{message}</p>
+        <div className="flex gap-2 justify-end">
+          <button onClick={onCancel} className={btnSecondary}>Cancel</button>
+          <button onClick={onConfirm} className="px-4 py-2 bg-red-500 text-white rounded-md text-sm font-medium hover:bg-red-600">
+            Delete
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function useConfirm() {
+  const [state, setState] = useState<{ message: string; resolve: (v: boolean) => void } | null>(null);
+
+  function confirm(message: string): Promise<boolean> {
+    return new Promise((resolve) => {
+      setState({ message, resolve });
+    });
+  }
+
+  function dialog() {
+    if (!state) return null;
+    return (
+      <ConfirmDialog
+        message={state.message}
+        onConfirm={() => { state.resolve(true); setState(null); }}
+        onCancel={() => { state.resolve(false); setState(null); }}
+      />
+    );
+  }
+
+  return { confirm, dialog };
 }
