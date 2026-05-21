@@ -123,11 +123,12 @@ function createServer() {
       priority: z.enum(["low", "medium", "high"]).optional().describe("Purchase priority"),
       url: z.string().optional().describe("Link to buy"),
       price: z.number().optional().describe("Price in ARS (nullable)"),
+      purchased: z.boolean().optional().default(false).describe("Whether already purchased/owned"),
     },
-  }, async ({ name, description, priority, url, price }) => {
+  }, async ({ name, description, priority, url, price, purchased }) => {
     const result = await execute(
-      "INSERT INTO equipment (name, description, priority, purchased, url, price) VALUES (?, ?, ?, 0, ?, ?)",
-      [name, description || "", priority || "medium", url || "", price ?? null]
+      "INSERT INTO equipment (name, description, priority, purchased, url, price) VALUES (?, ?, ?, ?, ?, ?)",
+      [name, description || "", priority || "medium", purchased ? 1 : 0, url || "", price ?? null]
     );
     const row = await execute("SELECT * FROM equipment WHERE id = ?", [result.lastInsertRowid!]);
     return { content: [{ type: "text", text: `Created: ${JSON.stringify(row.rows[0], null, 2)}` }] };

@@ -129,12 +129,13 @@ server.registerTool(
       description: z.string().optional().describe("Description"),
       priority: z.enum(["low", "medium", "high"]).optional().describe("Purchase priority"),
       url: z.string().optional().describe("Link to buy"),
+      purchased: z.boolean().optional().default(false).describe("Whether already purchased/owned"),
     },
   },
-  async ({ name, description, priority, url }) => {
+  async ({ name, description, priority, url, purchased }) => {
     const data = await api("/api/equipment", {
       method: "POST",
-      body: JSON.stringify({ name, description, priority, url }),
+      body: JSON.stringify({ name, description, priority, url, purchased }),
     });
     return { content: [{ type: "text", text: `Created equipment: ${JSON.stringify(data, null, 2)}` }] };
   }
