@@ -1,4 +1,4 @@
-import { execute } from "@/lib/db";
+import { execute, buildPartialUpdate } from "@/lib/db";
 import { NextRequest } from "next/server";
 
 export async function GET() {
@@ -26,10 +26,15 @@ export async function PUT(request: NextRequest) {
   if (!id) {
     return Response.json({ error: "ID is required" }, { status: 400 });
   }
-  await execute(
-    "UPDATE equipment SET name = ?, description = ?, priority = ?, purchased = ?, url = ?, price = ? WHERE id = ?",
-    [name, description || "", priority || "medium", purchased ? 1 : 0, url || "", price ?? null, id]
-  );
+  const update = buildPartialUpdate("equipment", id, {
+    name,
+    description,
+    priority,
+    purchased: purchased !== undefined ? (purchased ? 1 : 0) : undefined,
+    url,
+    price: price !== undefined ? (price ?? null) : undefined,
+  });
+  if (update) await execute(update.sql, update.args);
   const row = await execute("SELECT * FROM equipment WHERE id = ?", [id]);
   return Response.json(row.rows[0]);
 }

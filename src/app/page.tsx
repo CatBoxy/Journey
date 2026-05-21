@@ -52,7 +52,8 @@ interface Entry {
 
 interface TimeStats {
   total_minutes: number;
-  entry_count: number;
+  total_entry_count: number;
+  tracked_entry_count: number;
   first_entry: string | null;
   last_entry: string | null;
   monthly: Array<{ month: string; minutes: number; entries: number }>;
@@ -534,8 +535,8 @@ function TechniqueDetail({
             {timeStats && timeStats.total_minutes > 0 && (
               <span>{Math.round(timeStats.total_minutes / 60 * 10) / 10}h logged</span>
             )}
-            {timeStats && timeStats.entry_count > 0 && (
-              <span>{timeStats.entry_count} entries</span>
+            {timeStats && timeStats.total_entry_count > 0 && (
+              <span>{timeStats.total_entry_count} entries{timeStats.tracked_entry_count > 0 && timeStats.tracked_entry_count < timeStats.total_entry_count ? ` (${timeStats.tracked_entry_count} tracked)` : ""}</span>
             )}
             {costRollup && costRollup.total > 0 && (
               <span>ARS {costRollup.spent.toLocaleString()} spent{costRollup.to_spend > 0 ? ` / ${costRollup.to_spend.toLocaleString()} pending` : ""}</span>

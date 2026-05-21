@@ -66,3 +66,25 @@ export async function execute(sql: string, args: unknown[] = []): Promise<Execut
     lastInsertRowid: last_insert_rowid != null ? BigInt(last_insert_rowid) : undefined,
   };
 }
+
+/**
+ * Build a partial UPDATE query from only the fields that are explicitly provided.
+ * Fields with value `undefined` are skipped (not sent = not changed).
+ * Fields with value `null`, `""`, or any other value are included (explicit set).
+ */
+export function buildPartialUpdate(
+  table: string,
+  id: number,
+  fields: Record<string, unknown>
+): { sql: string; args: unknown[] } | null {
+  const setClauses: string[] = [];
+  const args: unknown[] = [];
+  for (const [col, val] of Object.entries(fields)) {
+    if (val === undefined) continue;
+    setClauses.push(`${col} = ?`);
+    args.push(val);
+  }
+  if (setClauses.length === 0) return null;
+  args.push(id);
+  return { sql: `UPDATE ${table} SET ${setClauses.join(", ")} WHERE id = ?`, args };
+}

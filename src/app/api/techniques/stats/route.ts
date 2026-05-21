@@ -11,7 +11,8 @@ export async function GET(request: NextRequest) {
   const result = await execute(
     `SELECT
        COALESCE(SUM(minutes_spent), 0) as total_minutes,
-       COUNT(*) as entry_count,
+       COUNT(*) as total_entry_count,
+       COUNT(minutes_spent) as tracked_entry_count,
        MIN(created_at) as first_entry,
        MAX(created_at) as last_entry
      FROM technique_entries
@@ -19,7 +20,6 @@ export async function GET(request: NextRequest) {
     [techniqueId]
   );
 
-  // Monthly breakdown
   const monthly = await execute(
     `SELECT
        strftime('%Y-%m', created_at) as month,
@@ -35,7 +35,8 @@ export async function GET(request: NextRequest) {
   const stats = result.rows[0];
   return Response.json({
     total_minutes: stats.total_minutes,
-    entry_count: stats.entry_count,
+    total_entry_count: stats.total_entry_count,
+    tracked_entry_count: stats.tracked_entry_count,
     first_entry: stats.first_entry,
     last_entry: stats.last_entry,
     monthly: monthly.rows,

@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { z } from "zod";
-import { execute } from "@/lib/db";
+import { execute, buildPartialUpdate } from "@/lib/db";
 
 function createServer() {
   const server = new McpServer(
@@ -44,20 +44,18 @@ function createServer() {
   });
 
   server.registerTool("update_technique", {
-    description: "Update an existing technique's name, description, difficulty, status, or category",
+    description: "Update an existing technique. Only fields you include will be changed — omitted fields are left untouched.",
     inputSchema: {
       id: z.number().describe("Technique ID"),
-      name: z.string().describe("Name"),
+      name: z.string().optional().describe("Name"),
       description: z.string().optional().describe("Description"),
       difficulty: z.enum(["beginner", "intermediate", "advanced"]).optional(),
       status: z.enum(["want_to_learn", "learning", "mastered"]).optional(),
       category: z.string().optional().describe("Free-form category"),
     },
   }, async ({ id, name, description, difficulty, status, category }) => {
-    await execute(
-      "UPDATE techniques SET name = ?, description = ?, difficulty = ?, status = ?, category = ? WHERE id = ?",
-      [name, description || "", difficulty || "beginner", status || "want_to_learn", category || "", id]
-    );
+    const update = buildPartialUpdate("techniques", id, { name, description, difficulty, status, category });
+    if (update) await execute(update.sql, update.args);
     const row = await execute("SELECT * FROM techniques WHERE id = ?", [id]);
     return { content: [{ type: "text", text: `Updated: ${JSON.stringify(row.rows[0], null, 2)}` }] };
   });
@@ -91,20 +89,18 @@ function createServer() {
   });
 
   server.registerTool("update_book", {
-    description: "Update an existing book's title, author, description, status, or url",
+    description: "Update an existing book. Only fields you include will be changed — omitted fields are left untouched.",
     inputSchema: {
       id: z.number().describe("Book ID"),
-      title: z.string().describe("Book title"),
+      title: z.string().optional().describe("Book title"),
       author: z.string().optional().describe("Author name"),
       description: z.string().optional().describe("Notes"),
       status: z.enum(["want_to_read", "reading", "read"]).optional(),
       url: z.string().optional().describe("Purchase or reference link"),
     },
   }, async ({ id, title, author, description, status, url }) => {
-    await execute(
-      "UPDATE books SET title = ?, author = ?, description = ?, status = ?, url = ? WHERE id = ?",
-      [title, author || "", description || "", status || "want_to_read", url || "", id]
-    );
+    const update = buildPartialUpdate("books", id, { title, author, description, status, url });
+    if (update) await execute(update.sql, update.args);
     const row = await execute("SELECT * FROM books WHERE id = ?", [id]);
     return { content: [{ type: "text", text: `Updated: ${JSON.stringify(row.rows[0], null, 2)}` }] };
   });
@@ -138,21 +134,26 @@ function createServer() {
   });
 
   server.registerTool("update_equipment", {
-    description: "Update existing equipment's name, description, priority, url, or price (ARS)",
+    description: "Update existing equipment. Only fields you include will be changed — omitted fields are left untouched. Price is in ARS.",
     inputSchema: {
       id: z.number().describe("Equipment ID"),
-      name: z.string().describe("Equipment name"),
+      name: z.string().optional().describe("Equipment name"),
       description: z.string().optional(),
       priority: z.enum(["low", "medium", "high"]).optional(),
       url: z.string().optional().describe("Link to buy"),
-      price: z.number().optional().describe("Price in ARS (nullable)"),
+      price: z.number().optional().describe("Price in ARS"),
       purchased: z.boolean().optional().describe("Whether the equipment has been purchased"),
     },
   }, async ({ id, name, description, priority, url, price, purchased }) => {
-    await execute(
-      "UPDATE equipment SET name = ?, description = ?, priority = ?, url = ?, price = ?, purchased = ? WHERE id = ?",
-      [name, description || "", priority || "medium", url || "", price ?? null, purchased ? 1 : 0, id]
-    );
+    const update = buildPartialUpdate("equipment", id, {
+      name,
+      description,
+      priority,
+      url,
+      price: price !== undefined ? (price ?? null) : undefined,
+      purchased: purchased !== undefined ? (purchased ? 1 : 0) : undefined,
+    });
+    if (update) await execute(update.sql, update.args);
     const row = await execute("SELECT * FROM equipment WHERE id = ?", [id]);
     return { content: [{ type: "text", text: `Updated: ${JSON.stringify(row.rows[0], null, 2)}` }] };
   });
@@ -285,7 +286,7 @@ function createServer() {
   });
 
   server.registerTool("get_technique_time_stats", {
-    description: "Get time tracking stats for a technique: total minutes, entry count, date range, and monthly breakdown",
+    description: "Get time tracking stats for a technique. Returns total_minutes, total_entry_count (all entries), tracked_entry_count (entries with minutes_spent set), date range, and monthly breakdown.",
     inputSchema: {
       techniqueId: z.number().describe("Technique ID"),
     },
@@ -293,7 +294,8 @@ function createServer() {
     const result = await execute(
       `SELECT
          COALESCE(SUM(minutes_spent), 0) as total_minutes,
-         COUNT(*) as entry_count,
+         COUNT(*) as total_entry_count,
+         COUNT(minutes_spent) as tracked_entry_count,
          MIN(created_at) as first_entry,
          MAX(created_at) as last_entry
        FROM technique_entries WHERE technique_id = ?`,
