@@ -46,6 +46,7 @@ export async function POST(request: NextRequest) {
   const formData = await request.formData();
   const techniqueId = formData.get("techniqueId") as string;
   const text = (formData.get("text") as string) || "";
+  const minutesSpent = formData.get("minutesSpent") as string;
   const bookIds = formData.get("bookIds") as string;
   const equipmentIds = formData.get("equipmentIds") as string;
   const files = formData.getAll("files") as File[];
@@ -55,8 +56,8 @@ export async function POST(request: NextRequest) {
   }
 
   const result = await execute(
-    "INSERT INTO technique_entries (technique_id, text) VALUES (?, ?)",
-    [techniqueId, text]
+    "INSERT INTO technique_entries (technique_id, text, minutes_spent) VALUES (?, ?, ?)",
+    [techniqueId, text, minutesSpent ? Number(minutesSpent) : null]
   );
   const entryId = result.lastInsertRowid!;
 

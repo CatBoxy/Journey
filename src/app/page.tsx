@@ -10,6 +10,7 @@ interface Technique {
   description: string;
   difficulty: "beginner" | "intermediate" | "advanced";
   status: "want_to_learn" | "learning" | "mastered";
+  category: string;
 }
 
 interface Equipment {
@@ -19,6 +20,7 @@ interface Equipment {
   priority: "low" | "medium" | "high";
   purchased: number;
   url: string;
+  price: number | null;
 }
 
 interface Book {
@@ -27,6 +29,7 @@ interface Book {
   author: string;
   description: string;
   status: "want_to_read" | "reading" | "read";
+  url: string;
 }
 
 interface EntryImage {
@@ -40,10 +43,25 @@ interface Entry {
   id: number;
   technique_id: number;
   text: string;
+  minutes_spent: number | null;
   created_at: string;
   images: EntryImage[];
   books: Book[];
   equipment: Equipment[];
+}
+
+interface TimeStats {
+  total_minutes: number;
+  entry_count: number;
+  first_entry: string | null;
+  last_entry: string | null;
+  monthly: Array<{ month: string; minutes: number; entries: number }>;
+}
+
+interface CostRollup {
+  spent: number;
+  to_spend: number;
+  total: number;
 }
 
 interface FeedEntry extends Entry {
@@ -317,6 +335,7 @@ function EditTechniqueModal({
   const [description, setDescription] = useState(technique.description);
   const [difficulty, setDifficulty] = useState(technique.difficulty);
   const [status, setStatus] = useState(technique.status);
+  const [category, setCategory] = useState(technique.category || "");
   const [saving, setSaving] = useState(false);
 
   async function submit(e: React.FormEvent) {
@@ -325,7 +344,7 @@ function EditTechniqueModal({
     await fetch("/api/techniques", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: technique.id, name, description, difficulty, status }),
+      body: JSON.stringify({ id: technique.id, name, description, difficulty, status, category }),
     });
     onSave();
   }
@@ -356,6 +375,7 @@ function EditTechniqueModal({
               <option value="mastered">Mastered</option>
             </select>
           </div>
+          <input className={inputClass} placeholder="Category (e.g. soldering, finishing)" value={category} onChange={(e) => setCategory(e.target.value)} disabled={saving} />
           <div className="flex gap-2 pt-2">
             <button type="submit" disabled={saving} className={btnPrimary}>{saving ? "Saving..." : "Save"}</button>
             <button type="button" onClick={onClose} disabled={saving} className={btnSecondary}>Cancel</button>
@@ -397,6 +417,8 @@ function TechniqueDetail({
   const [linkedEquipment, setLinkedEquipment] = useState<Equipment[]>([]);
   const [entries, setEntries] = useState<Entry[]>([]);
   const [images, setImages] = useState<TechniqueImage[]>([]);
+  const [timeStats, setTimeStats] = useState<TimeStats | null>(null);
+  const [costRollup, setCostRollup] = useState<CostRollup | null>(null);
   const [detailLoading, setDetailLoading] = useState(true);
   const imageInputRef = useRef<HTMLInputElement>(null);
 
@@ -406,6 +428,7 @@ function TechniqueDetail({
       .then((data) => {
         setLinkedBooks(data.books);
         setLinkedEquipment(data.equipment);
+        if (data.cost) setCostRollup(data.cost);
       });
   }, [technique.id]);
 
@@ -421,9 +444,15 @@ function TechniqueDetail({
       .then(setImages);
   }, [technique.id]);
 
+  const fetchStats = useCallback(() => {
+    return fetch(`/api/techniques/stats?techniqueId=${technique.id}`)
+      .then((r) => r.json())
+      .then(setTimeStats);
+  }, [technique.id]);
+
   useEffect(() => {
-    Promise.all([fetchLinks(), fetchEntries(), fetchImages()]).then(() => setDetailLoading(false));
-  }, [fetchLinks, fetchEntries, fetchImages]);
+    Promise.all([fetchLinks(), fetchEntries(), fetchImages(), fetchStats()]).then(() => setDetailLoading(false));
+  }, [fetchLinks, fetchEntries, fetchImages, fetchStats]);
 
   async function linkItem(type: "book" | "equipment", targetId: number) {
     await fetch("/api/techniques/links", {
@@ -486,14 +515,46 @@ function TechniqueDetail({
         {technique.description && (
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{technique.description}</p>
         )}
-        <div className="flex gap-2 mt-2">
+        <div className="flex flex-wrap gap-2 mt-2">
           <span className={`text-xs px-2 py-0.5 rounded-full ${DIFFICULTY_COLORS[technique.difficulty]}`}>
             {formatLabel(technique.difficulty)}
           </span>
           <span className={`text-xs px-2 py-0.5 rounded-full ${STATUS_COLORS[technique.status]}`}>
             {formatLabel(technique.status)}
           </span>
+          {technique.category && (
+            <span className="text-xs px-2 py-0.5 rounded-full bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200">
+              {technique.category}
+            </span>
+          )}
         </div>
+        {/* Stats bar */}
+        {!detailLoading && (timeStats || costRollup) && (
+          <div className="flex flex-wrap gap-4 mt-3 text-xs text-gray-500 dark:text-gray-400">
+            {timeStats && timeStats.total_minutes > 0 && (
+              <span>{Math.round(timeStats.total_minutes / 60 * 10) / 10}h logged</span>
+            )}
+            {timeStats && timeStats.entry_count > 0 && (
+              <span>{timeStats.entry_count} entries</span>
+            )}
+            {costRollup && costRollup.total > 0 && (
+              <span>ARS {costRollup.spent.toLocaleString()} spent{costRollup.to_spend > 0 ? ` / ${costRollup.to_spend.toLocaleString()} pending` : ""}</span>
+            )}
+          </div>
+        )}
+        {/* Monthly breakdown */}
+        {timeStats && timeStats.monthly && timeStats.monthly.length > 1 && (
+          <div className="mt-3 space-y-1">
+            <p className="text-xs font-medium text-gray-500">Monthly</p>
+            <div className="flex flex-wrap gap-2">
+              {timeStats.monthly.map((m) => (
+                <span key={m.month} className="text-xs px-2 py-0.5 bg-gray-100 dark:bg-gray-800 rounded">
+                  {m.month}: {Math.round(m.minutes / 60 * 10) / 10}h ({m.entries} entries)
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Detail tabs */}
@@ -674,6 +735,7 @@ function NewEntryForm({
   onCreated: () => void;
 }) {
   const [text, setText] = useState("");
+  const [minutesSpent, setMinutesSpent] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const [selectedBookIds, setSelectedBookIds] = useState<number[]>([]);
   const [selectedEquipmentIds, setSelectedEquipmentIds] = useState<number[]>([]);
@@ -687,6 +749,7 @@ function NewEntryForm({
     const formData = new FormData();
     formData.append("techniqueId", String(techniqueId));
     formData.append("text", text);
+    if (minutesSpent) formData.append("minutesSpent", minutesSpent);
     if (selectedBookIds.length > 0) {
       formData.append("bookIds", JSON.stringify(selectedBookIds));
     }
@@ -698,6 +761,7 @@ function NewEntryForm({
     }
     await fetch("/api/techniques/entries", { method: "POST", body: formData });
     setText("");
+    setMinutesSpent("");
     setFiles([]);
     setSelectedBookIds([]);
     setSelectedEquipmentIds([]);
@@ -727,6 +791,14 @@ function NewEntryForm({
         value={text}
         onChange={(e) => setText(e.target.value)}
         rows={3}
+      />
+      <input
+        className={inputClass + " !w-32"}
+        type="number"
+        min="0"
+        placeholder="Minutes spent"
+        value={minutesSpent}
+        onChange={(e) => setMinutesSpent(e.target.value)}
       />
 
       {/* Image previews */}
@@ -875,7 +947,12 @@ function EntryCard({ entry, onDelete, onUpdated }: { entry: Entry; onDelete: () 
   return (
     <div className="p-4 border border-gray-200 dark:border-gray-700 rounded-lg space-y-3">
       <div className="flex items-start justify-between">
-        <time className="text-xs text-gray-400">{dateStr}</time>
+        <div className="flex items-center gap-3">
+          <time className="text-xs text-gray-400">{dateStr}</time>
+          {entry.minutes_spent != null && entry.minutes_spent > 0 && (
+            <span className="text-xs text-gray-400">{entry.minutes_spent}min</span>
+          )}
+        </div>
         <div className="flex gap-2">
           <button onClick={() => setEditingText(!editingText)} className="text-xs text-gray-500 hover:text-foreground">
             {editingText ? "Cancel" : "Edit"}
@@ -982,13 +1059,14 @@ function TechniqueForm({ onDone, onCancel }: { onDone: () => void; onCancel: () 
   const [description, setDescription] = useState("");
   const [difficulty, setDifficulty] = useState<Technique["difficulty"]>("beginner");
   const [status, setStatus] = useState<Technique["status"]>("want_to_learn");
+  const [category, setCategory] = useState("");
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     await fetch("/api/techniques", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, description, difficulty, status }),
+      body: JSON.stringify({ name, description, difficulty, status, category }),
     });
     onDone();
   }
@@ -997,6 +1075,7 @@ function TechniqueForm({ onDone, onCancel }: { onDone: () => void; onCancel: () 
     <form onSubmit={submit} className="mb-6 p-4 border border-gray-200 dark:border-gray-700 rounded-lg space-y-3">
       <input className={inputClass} placeholder="Technique name" value={name} onChange={(e) => setName(e.target.value)} required />
       <textarea className={inputClass} placeholder="Description (optional)" value={description} onChange={(e) => setDescription(e.target.value)} rows={2} />
+      <input className={inputClass} placeholder="Category (e.g. soldering, finishing)" value={category} onChange={(e) => setCategory(e.target.value)} />
       <div className="flex gap-3">
         <select className={inputClass + " !w-auto"} value={difficulty} onChange={(e) => setDifficulty(e.target.value as Technique["difficulty"])}>
           <option value="beginner">Beginner</option>
@@ -1028,43 +1107,73 @@ function TechniqueList({
   onEdit: (id: number) => void;
   onDelete: (id: number) => void;
 }) {
+  const [filterCat, setFilterCat] = useState<string>("");
+  const categories = [...new Set(items.map((t) => t.category).filter(Boolean))];
+  const filtered = filterCat ? items.filter((t) => t.category === filterCat) : items;
+
   if (items.length === 0) return <EmptyState label="techniques" />;
   return (
-    <div className="space-y-2">
-      {items.map((t) => (
-        <div
-          key={t.id}
-          onClick={() => onOpen(t.id)}
-          className="flex items-start justify-between p-4 border border-gray-200 dark:border-gray-700 rounded-lg cursor-pointer hover:border-gray-400 dark:hover:border-gray-500 transition-colors"
-        >
-          <div className="space-y-1">
-            <div className="font-medium">{t.name}</div>
-            {t.description && <div className="text-sm text-gray-500 dark:text-gray-400">{t.description}</div>}
-            <div className="flex gap-2 mt-1">
-              <span className={`text-xs px-2 py-0.5 rounded-full ${DIFFICULTY_COLORS[t.difficulty]}`}>
-                {formatLabel(t.difficulty)}
-              </span>
-              <span className={`text-xs px-2 py-0.5 rounded-full ${STATUS_COLORS[t.status]}`}>
-                {formatLabel(t.status)}
-              </span>
+    <div className="space-y-3">
+      {categories.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          <button
+            onClick={() => setFilterCat("")}
+            className={`text-xs px-2 py-1 rounded-full border transition-colors ${!filterCat ? "bg-foreground text-background border-foreground" : "border-gray-300 dark:border-gray-600 text-gray-500"}`}
+          >
+            All
+          </button>
+          {categories.map((c) => (
+            <button
+              key={c}
+              onClick={() => setFilterCat(filterCat === c ? "" : c)}
+              className={`text-xs px-2 py-1 rounded-full border transition-colors ${filterCat === c ? "bg-purple-100 border-purple-300 text-purple-800 dark:bg-purple-900 dark:border-purple-700 dark:text-purple-200" : "border-gray-300 dark:border-gray-600 text-gray-500"}`}
+            >
+              {c}
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="space-y-2">
+        {filtered.map((t) => (
+          <div
+            key={t.id}
+            onClick={() => onOpen(t.id)}
+            className="flex items-start justify-between p-4 border border-gray-200 dark:border-gray-700 rounded-lg cursor-pointer hover:border-gray-400 dark:hover:border-gray-500 transition-colors"
+          >
+            <div className="space-y-1">
+              <div className="font-medium">{t.name}</div>
+              {t.description && <div className="text-sm text-gray-500 dark:text-gray-400">{t.description}</div>}
+              <div className="flex flex-wrap gap-2 mt-1">
+                <span className={`text-xs px-2 py-0.5 rounded-full ${DIFFICULTY_COLORS[t.difficulty]}`}>
+                  {formatLabel(t.difficulty)}
+                </span>
+                <span className={`text-xs px-2 py-0.5 rounded-full ${STATUS_COLORS[t.status]}`}>
+                  {formatLabel(t.status)}
+                </span>
+                {t.category && (
+                  <span className="text-xs px-2 py-0.5 rounded-full bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200">
+                    {t.category}
+                  </span>
+                )}
+              </div>
+            </div>
+            <div className="flex gap-1 shrink-0 ml-4">
+              <button
+                onClick={(e) => { e.stopPropagation(); onEdit(t.id); }}
+                className="text-xs px-2 py-1 text-gray-500 hover:text-foreground"
+              >
+                Edit
+              </button>
+              <button
+                onClick={(e) => { e.stopPropagation(); onDelete(t.id); }}
+                className="text-xs px-2 py-1 text-red-500 hover:text-red-700"
+              >
+                Delete
+              </button>
             </div>
           </div>
-          <div className="flex gap-1 shrink-0 ml-4">
-            <button
-              onClick={(e) => { e.stopPropagation(); onEdit(t.id); }}
-              className="text-xs px-2 py-1 text-gray-500 hover:text-foreground"
-            >
-              Edit
-            </button>
-            <button
-              onClick={(e) => { e.stopPropagation(); onDelete(t.id); }}
-              className="text-xs px-2 py-1 text-red-500 hover:text-red-700"
-            >
-              Delete
-            </button>
-          </div>
-        </div>
-      ))}
+        ))}
+      </div>
     </div>
   );
 }
@@ -1087,6 +1196,7 @@ function EquipmentForm({
   const [priority, setPriority] = useState(item?.priority || "medium");
   const [purchased, setPurchased] = useState(!!item?.purchased);
   const [url, setUrl] = useState(item?.url || "");
+  const [price, setPrice] = useState(item?.price != null ? String(item.price) : "");
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -1094,7 +1204,7 @@ function EquipmentForm({
     await fetch("/api/equipment", {
       method,
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: item?.id, name, description, priority, purchased, url }),
+      body: JSON.stringify({ id: item?.id, name, description, priority, purchased, url, price: price ? Number(price) : null }),
     });
     onDone();
   }
@@ -1104,6 +1214,7 @@ function EquipmentForm({
       <input className={inputClass} placeholder="Equipment name" value={name} onChange={(e) => setName(e.target.value)} required />
       <textarea className={inputClass} placeholder="Description (optional)" value={description} onChange={(e) => setDescription(e.target.value)} rows={2} />
       <input className={inputClass} placeholder="Link to buy (optional)" value={url} onChange={(e) => setUrl(e.target.value)} />
+      <input className={inputClass + " !w-40"} type="number" min="0" step="0.01" placeholder="Price (ARS)" value={price} onChange={(e) => setPrice(e.target.value)} />
       <div className="flex gap-3 items-center">
         <select className={inputClass + " !w-auto"} value={priority} onChange={(e) => setPriority(e.target.value as Equipment["priority"])}>
           <option value="low">Low Priority</option>
@@ -1215,6 +1326,7 @@ function BookForm({
   const [author, setAuthor] = useState(book?.author || "");
   const [description, setDescription] = useState(book?.description || "");
   const [status, setStatus] = useState(book?.status || "want_to_read");
+  const [url, setUrl] = useState(book?.url || "");
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -1222,7 +1334,7 @@ function BookForm({
     await fetch("/api/books", {
       method,
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: book?.id, title, author, description, status }),
+      body: JSON.stringify({ id: book?.id, title, author, description, status, url }),
     });
     onDone();
   }
@@ -1232,6 +1344,7 @@ function BookForm({
       <input className={inputClass} placeholder="Book title" value={title} onChange={(e) => setTitle(e.target.value)} required />
       <input className={inputClass} placeholder="Author (optional)" value={author} onChange={(e) => setAuthor(e.target.value)} />
       <textarea className={inputClass} placeholder="Notes (optional)" value={description} onChange={(e) => setDescription(e.target.value)} rows={2} />
+      <input className={inputClass} placeholder="Link (optional)" value={url} onChange={(e) => setUrl(e.target.value)} />
       <select className={inputClass + " !w-auto"} value={status} onChange={(e) => setStatus(e.target.value as Book["status"])}>
         <option value="want_to_read">Want to Read</option>
         <option value="reading">Reading</option>

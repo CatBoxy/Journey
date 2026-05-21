@@ -8,13 +8,13 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   const body = await request.json();
-  const { title, author, description, status } = body;
+  const { title, author, description, status, url } = body;
   if (!title) {
     return Response.json({ error: "Title is required" }, { status: 400 });
   }
   const result = await execute(
-    "INSERT INTO books (title, author, description, status) VALUES (?, ?, ?, ?)",
-    [title, author || "", description || "", status || "want_to_read"]
+    "INSERT INTO books (title, author, description, status, url) VALUES (?, ?, ?, ?, ?)",
+    [title, author || "", description || "", status || "want_to_read", url || ""]
   );
   const row = await execute("SELECT * FROM books WHERE id = ?", [result.lastInsertRowid!]);
   return Response.json(row.rows[0], { status: 201 });
@@ -22,13 +22,13 @@ export async function POST(request: NextRequest) {
 
 export async function PUT(request: NextRequest) {
   const body = await request.json();
-  const { id, title, author, description, status } = body;
+  const { id, title, author, description, status, url } = body;
   if (!id) {
     return Response.json({ error: "ID is required" }, { status: 400 });
   }
   await execute(
-    "UPDATE books SET title = ?, author = ?, description = ?, status = ? WHERE id = ?",
-    [title, author || "", description || "", status || "want_to_read", id]
+    "UPDATE books SET title = ?, author = ?, description = ?, status = ?, url = ? WHERE id = ?",
+    [title, author || "", description || "", status || "want_to_read", url || "", id]
   );
   const row = await execute("SELECT * FROM books WHERE id = ?", [id]);
   return Response.json(row.rows[0]);

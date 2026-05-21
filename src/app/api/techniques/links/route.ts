@@ -19,7 +19,16 @@ export async function GET(request: NextRequest) {
      WHERE te.technique_id = ?`,
     [techniqueId]
   );
-  return Response.json({ books: books.rows, equipment: equipment.rows });
+  // Cost rollup: split by owned vs to-spend
+  const eqRows = equipment.rows as Array<{ purchased: number; price: number | null; priority: string }>;
+  const spent = eqRows.filter((e) => e.purchased).reduce((sum, e) => sum + (e.price || 0), 0);
+  const toSpend = eqRows.filter((e) => !e.purchased).reduce((sum, e) => sum + (e.price || 0), 0);
+
+  return Response.json({
+    books: books.rows,
+    equipment: equipment.rows,
+    cost: { spent, to_spend: toSpend, total: spent + toSpend },
+  });
 }
 
 export async function POST(request: NextRequest) {

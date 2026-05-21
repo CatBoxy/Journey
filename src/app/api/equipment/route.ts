@@ -8,13 +8,13 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   const body = await request.json();
-  const { name, description, priority, purchased, url } = body;
+  const { name, description, priority, purchased, url, price } = body;
   if (!name) {
     return Response.json({ error: "Name is required" }, { status: 400 });
   }
   const result = await execute(
-    "INSERT INTO equipment (name, description, priority, purchased, url) VALUES (?, ?, ?, ?, ?)",
-    [name, description || "", priority || "medium", purchased ? 1 : 0, url || ""]
+    "INSERT INTO equipment (name, description, priority, purchased, url, price) VALUES (?, ?, ?, ?, ?, ?)",
+    [name, description || "", priority || "medium", purchased ? 1 : 0, url || "", price ?? null]
   );
   const row = await execute("SELECT * FROM equipment WHERE id = ?", [result.lastInsertRowid!]);
   return Response.json(row.rows[0], { status: 201 });
@@ -22,13 +22,13 @@ export async function POST(request: NextRequest) {
 
 export async function PUT(request: NextRequest) {
   const body = await request.json();
-  const { id, name, description, priority, purchased, url } = body;
+  const { id, name, description, priority, purchased, url, price } = body;
   if (!id) {
     return Response.json({ error: "ID is required" }, { status: 400 });
   }
   await execute(
-    "UPDATE equipment SET name = ?, description = ?, priority = ?, purchased = ?, url = ? WHERE id = ?",
-    [name, description || "", priority || "medium", purchased ? 1 : 0, url || "", id]
+    "UPDATE equipment SET name = ?, description = ?, priority = ?, purchased = ?, url = ?, price = ? WHERE id = ?",
+    [name, description || "", priority || "medium", purchased ? 1 : 0, url || "", price ?? null, id]
   );
   const row = await execute("SELECT * FROM equipment WHERE id = ?", [id]);
   return Response.json(row.rows[0]);
