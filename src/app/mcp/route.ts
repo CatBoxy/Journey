@@ -108,7 +108,7 @@ function createServer() {
   // ---- Equipment ----
 
   server.registerTool("list_equipment", {
-    description: "List all jewelry equipment being tracked. Includes price (ARS) and purchased status.",
+    description: "List all jewelry equipment being tracked. Includes price (ARS), purchased status, and consumable flag. Consumables are supplies bought repeatedly (borax, solder, sandpaper, pickle, investment, flux); non-consumables are durable tools.",
     inputSchema: {},
   }, async () => {
     const result = await execute("SELECT * FROM equipment ORDER BY created_at DESC");
@@ -116,26 +116,27 @@ function createServer() {
   });
 
   server.registerTool("add_equipment", {
-    description: "Add new equipment to track. Price is in ARS.",
+    description: "Add new equipment to track. Price is in ARS. Set consumable=true for supplies bought repeatedly (borax, solder, sandpaper, pickle, investment, flux); leave false for durable tools (torches, saws, files, motors, pliers).",
     inputSchema: {
       name: z.string().describe("Equipment name"),
       description: z.string().optional().describe("Description"),
       priority: z.enum(["low", "medium", "high"]).optional().describe("Purchase priority"),
       url: z.string().optional().describe("Link to buy"),
       price: z.number().optional().describe("Price in ARS (nullable)"),
-      purchased: z.boolean().optional().default(false).describe("Whether already purchased/owned"),
+      purchased: z.boolean().optional().default(false).describe("Whether already purchased/owned (for consumables: currently in stock)"),
+      consumable: z.boolean().optional().default(false).describe("Whether this is a supply that gets used up and re-bought"),
     },
-  }, async ({ name, description, priority, url, price, purchased }) => {
+  }, async ({ name, description, priority, url, price, purchased, consumable }) => {
     const result = await execute(
-      "INSERT INTO equipment (name, description, priority, purchased, url, price) VALUES (?, ?, ?, ?, ?, ?)",
-      [name, description || "", priority || "medium", purchased ? 1 : 0, url || "", price ?? null]
+      "INSERT INTO equipment (name, description, priority, purchased, url, price, consumable) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      [name, description || "", priority || "medium", purchased ? 1 : 0, url || "", price ?? null, consumable ? 1 : 0]
     );
     const row = await execute("SELECT * FROM equipment WHERE id = ?", [result.lastInsertRowid!]);
     return { content: [{ type: "text", text: `Created: ${JSON.stringify(row.rows[0], null, 2)}` }] };
   });
 
   server.registerTool("update_equipment", {
-    description: "Update existing equipment. Only fields you include will be changed — omitted fields are left untouched. Price is in ARS.",
+    description: "Update existing equipment. Only fields you include will be changed — omitted fields are left untouched. Price is in ARS. Set consumable=true for supplies bought repeatedly (borax, solder, sandpaper, pickle, investment, flux); false for durable tools.",
     inputSchema: {
       id: z.number().describe("Equipment ID"),
       name: z.string().optional().describe("Equipment name"),
@@ -143,9 +144,10 @@ function createServer() {
       priority: z.enum(["low", "medium", "high"]).optional(),
       url: z.string().optional().describe("Link to buy"),
       price: z.number().optional().describe("Price in ARS"),
-      purchased: z.boolean().optional().describe("Whether the equipment has been purchased"),
+      purchased: z.boolean().optional().describe("Whether purchased/owned (for consumables: currently in stock)"),
+      consumable: z.boolean().optional().describe("Whether this is a supply that gets used up and re-bought"),
     },
-  }, async ({ id, name, description, priority, url, price, purchased }) => {
+  }, async ({ id, name, description, priority, url, price, purchased, consumable }) => {
     const update = buildPartialUpdate("equipment", id, {
       name,
       description,
@@ -153,6 +155,7 @@ function createServer() {
       url,
       price: price !== undefined ? (price ?? null) : undefined,
       purchased: purchased !== undefined ? (purchased ? 1 : 0) : undefined,
+      consumable: consumable !== undefined ? (consumable ? 1 : 0) : undefined,
     });
     if (update) await execute(update.sql, update.args);
     const row = await execute("SELECT * FROM equipment WHERE id = ?", [id]);

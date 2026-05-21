@@ -111,7 +111,7 @@ server.registerTool(
 server.registerTool(
   "list_equipment",
   {
-    description: "List all jewelry equipment being tracked",
+    description: "List all jewelry equipment being tracked. Includes purchased status and consumable flag. Consumables are supplies bought repeatedly (borax, solder, sandpaper, pickle, investment, flux); non-consumables are durable tools.",
     inputSchema: {},
   },
   async () => {
@@ -123,19 +123,20 @@ server.registerTool(
 server.registerTool(
   "add_equipment",
   {
-    description: "Add new equipment to track",
+    description: "Add new equipment to track. Set consumable=true for supplies bought repeatedly (borax, solder, sandpaper, pickle, investment, flux); leave false for durable tools (torches, saws, files, motors, pliers).",
     inputSchema: {
       name: z.string().describe("Equipment name"),
       description: z.string().optional().describe("Description"),
       priority: z.enum(["low", "medium", "high"]).optional().describe("Purchase priority"),
       url: z.string().optional().describe("Link to buy"),
-      purchased: z.boolean().optional().default(false).describe("Whether already purchased/owned"),
+      purchased: z.boolean().optional().default(false).describe("Whether already purchased/owned (for consumables: currently in stock)"),
+      consumable: z.boolean().optional().default(false).describe("Whether this is a supply that gets used up and re-bought"),
     },
   },
-  async ({ name, description, priority, url, purchased }) => {
+  async ({ name, description, priority, url, purchased, consumable }) => {
     const data = await api("/api/equipment", {
       method: "POST",
-      body: JSON.stringify({ name, description, priority, url, purchased }),
+      body: JSON.stringify({ name, description, priority, url, purchased, consumable }),
     });
     return { content: [{ type: "text", text: `Created equipment: ${JSON.stringify(data, null, 2)}` }] };
   }
