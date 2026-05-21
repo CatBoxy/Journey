@@ -220,6 +220,149 @@ server.registerTool(
   }
 );
 
+// ---- Projects ----
+
+server.registerTool(
+  "list_projects",
+  {
+    description: "List all projects. Optionally filter by status.",
+    inputSchema: {
+      status: z.enum(["planned", "in_progress", "completed"]).optional().describe("Filter by status"),
+    },
+  },
+  async ({ status }) => {
+    const url = status ? `/api/projects?status=${status}` : "/api/projects";
+    const data = await api(url);
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  }
+);
+
+server.registerTool(
+  "add_project",
+  {
+    description: "Create a new project to group techniques, books, and equipment together",
+    inputSchema: {
+      name: z.string().describe("Project name"),
+      description: z.string().optional().describe("Description"),
+      status: z.enum(["planned", "in_progress", "completed"]).optional().describe("Project status"),
+    },
+  },
+  async ({ name, description, status }) => {
+    const data = await api("/api/projects", {
+      method: "POST",
+      body: JSON.stringify({ name, description, status }),
+    });
+    return { content: [{ type: "text", text: `Created project: ${JSON.stringify(data, null, 2)}` }] };
+  }
+);
+
+server.registerTool(
+  "update_project",
+  {
+    description: "Update an existing project. Only fields you include will be changed.",
+    inputSchema: {
+      id: z.number().describe("Project ID"),
+      name: z.string().optional().describe("Project name"),
+      description: z.string().optional().describe("Description"),
+      status: z.enum(["planned", "in_progress", "completed"]).optional(),
+    },
+  },
+  async ({ id, name, description, status }) => {
+    const data = await api("/api/projects", {
+      method: "PUT",
+      body: JSON.stringify({ id, name, description, status }),
+    });
+    return { content: [{ type: "text", text: `Updated: ${JSON.stringify(data, null, 2)}` }] };
+  }
+);
+
+server.registerTool(
+  "add_project_entry",
+  {
+    description: "Add a journal entry to a project",
+    inputSchema: {
+      projectId: z.number().describe("Project ID"),
+      text: z.string().describe("Entry text"),
+    },
+  },
+  async ({ projectId, text }) => {
+    const formData = new FormData();
+    formData.append("projectId", String(projectId));
+    formData.append("text", text);
+    const res = await fetch(`${BASE_URL}/api/projects/entries`, {
+      method: "POST",
+      body: formData,
+    });
+    const data = await res.json();
+    return { content: [{ type: "text", text: `Created project entry: ${JSON.stringify(data)}` }] };
+  }
+);
+
+server.registerTool(
+  "list_project_entries",
+  {
+    description: "List all journal entries for a project",
+    inputSchema: {
+      projectId: z.number().describe("Project ID"),
+    },
+  },
+  async ({ projectId }) => {
+    const data = await api(`/api/projects/entries?projectId=${projectId}`);
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  }
+);
+
+server.registerTool(
+  "link_to_project",
+  {
+    description: "Link a technique, book, or equipment to a project",
+    inputSchema: {
+      projectId: z.number().describe("Project ID"),
+      type: z.enum(["technique", "book", "equipment"]).describe("Type of item to link"),
+      targetId: z.number().describe("ID of the item to link"),
+    },
+  },
+  async ({ projectId, type, targetId }) => {
+    await api("/api/projects/links", {
+      method: "POST",
+      body: JSON.stringify({ projectId, type, targetId }),
+    });
+    return { content: [{ type: "text", text: `Linked ${type} ${targetId} to project ${projectId}` }] };
+  }
+);
+
+server.registerTool(
+  "unlink_from_project",
+  {
+    description: "Remove a technique, book, or equipment link from a project",
+    inputSchema: {
+      projectId: z.number().describe("Project ID"),
+      type: z.enum(["technique", "book", "equipment"]).describe("Type of item to unlink"),
+      targetId: z.number().describe("ID of the item to unlink"),
+    },
+  },
+  async ({ projectId, type, targetId }) => {
+    await api(`/api/projects/links?projectId=${projectId}&type=${type}&targetId=${targetId}`, {
+      method: "DELETE",
+    });
+    return { content: [{ type: "text", text: `Unlinked ${type} ${targetId} from project ${projectId}` }] };
+  }
+);
+
+server.registerTool(
+  "get_project_links",
+  {
+    description: "Get all techniques, books, and equipment linked to a project, with cost rollup",
+    inputSchema: {
+      projectId: z.number().describe("Project ID"),
+    },
+  },
+  async ({ projectId }) => {
+    const data = await api(`/api/projects/links?projectId=${projectId}`);
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  }
+);
+
 // ---- Start ----
 
 async function main() {

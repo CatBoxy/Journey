@@ -321,6 +321,150 @@ function createServer() {
     };
   });
 
+  // ---- Projects ----
+
+  server.registerTool("list_projects", {
+    description: "List all projects. Optionally filter by status (planned, in_progress, completed).",
+    inputSchema: {
+      status: z.enum(["planned", "in_progress", "completed"]).optional().describe("Filter by status"),
+    },
+  }, async ({ status }) => {
+    let sql = "SELECT * FROM projects";
+    const args: unknown[] = [];
+    if (status) { sql += " WHERE status = ?"; args.push(status); }
+    sql += " ORDER BY created_at DESC";
+    const result = await execute(sql, args);
+    return { content: [{ type: "text", text: JSON.stringify(result.rows, null, 2) }] };
+  });
+
+  server.registerTool("add_project", {
+    description: "Create a new project to group techniques, books, and equipment together",
+    inputSchema: {
+      name: z.string().describe("Project name"),
+      description: z.string().optional().describe("Description"),
+      status: z.enum(["planned", "in_progress", "completed"]).optional().describe("Project status"),
+    },
+  }, async ({ name, description, status }) => {
+    const result = await execute(
+      "INSERT INTO projects (name, description, status) VALUES (?, ?, ?)",
+      [name, description || "", status || "planned"]
+    );
+    const row = await execute("SELECT * FROM projects WHERE id = ?", [result.lastInsertRowid!]);
+    return { content: [{ type: "text", text: `Created: ${JSON.stringify(row.rows[0], null, 2)}` }] };
+  });
+
+  server.registerTool("update_project", {
+    description: "Update an existing project. Only fields you include will be changed — omitted fields are left untouched.",
+    inputSchema: {
+      id: z.number().describe("Project ID"),
+      name: z.string().optional().describe("Project name"),
+      description: z.string().optional().describe("Description"),
+      status: z.enum(["planned", "in_progress", "completed"]).optional(),
+    },
+  }, async ({ id, name, description, status }) => {
+    const update = buildPartialUpdate("projects", id, { name, description, status });
+    if (update) await execute(update.sql, update.args);
+    const row = await execute("SELECT * FROM projects WHERE id = ?", [id]);
+    return { content: [{ type: "text", text: `Updated: ${JSON.stringify(row.rows[0], null, 2)}` }] };
+  });
+
+  server.registerTool("add_project_entry", {
+    description: "Add a journal entry to a project. Log progress, notes, or observations.",
+    inputSchema: {
+      projectId: z.number().describe("Project ID"),
+      text: z.string().describe("Entry text"),
+    },
+  }, async ({ projectId, text }) => {
+    const result = await execute(
+      "INSERT INTO project_entries (project_id, text) VALUES (?, ?)",
+      [projectId, text]
+    );
+    return { content: [{ type: "text", text: `Created project entry #${result.lastInsertRowid}` }] };
+  });
+
+  server.registerTool("list_project_entries", {
+    description: "List all journal entries for a project, with attached images",
+    inputSchema: {
+      projectId: z.number().describe("Project ID"),
+    },
+  }, async ({ projectId }) => {
+    const entries = await execute(
+      "SELECT * FROM project_entries WHERE project_id = ? ORDER BY created_at DESC",
+      [projectId]
+    );
+    return { content: [{ type: "text", text: JSON.stringify(entries.rows, null, 2) }] };
+  });
+
+  server.registerTool("link_to_project", {
+    description: "Link a technique, book, or equipment to a project",
+    inputSchema: {
+      projectId: z.number().describe("Project ID"),
+      type: z.enum(["technique", "book", "equipment"]).describe("Type of item to link"),
+      targetId: z.number().describe("ID of the item to link"),
+    },
+  }, async ({ projectId, type, targetId }) => {
+    if (type === "technique") {
+      await execute("INSERT OR IGNORE INTO project_techniques (project_id, technique_id) VALUES (?, ?)", [projectId, targetId]);
+    } else if (type === "book") {
+      await execute("INSERT OR IGNORE INTO project_books (project_id, book_id) VALUES (?, ?)", [projectId, targetId]);
+    } else {
+      await execute("INSERT OR IGNORE INTO project_equipment (project_id, equipment_id) VALUES (?, ?)", [projectId, targetId]);
+    }
+    return { content: [{ type: "text", text: `Linked ${type} ${targetId} to project ${projectId}` }] };
+  });
+
+  server.registerTool("unlink_from_project", {
+    description: "Remove a technique, book, or equipment link from a project",
+    inputSchema: {
+      projectId: z.number().describe("Project ID"),
+      type: z.enum(["technique", "book", "equipment"]).describe("Type of item to unlink"),
+      targetId: z.number().describe("ID of the item to unlink"),
+    },
+  }, async ({ projectId, type, targetId }) => {
+    if (type === "technique") {
+      await execute("DELETE FROM project_techniques WHERE project_id = ? AND technique_id = ?", [projectId, targetId]);
+    } else if (type === "book") {
+      await execute("DELETE FROM project_books WHERE project_id = ? AND book_id = ?", [projectId, targetId]);
+    } else {
+      await execute("DELETE FROM project_equipment WHERE project_id = ? AND equipment_id = ?", [projectId, targetId]);
+    }
+    return { content: [{ type: "text", text: `Unlinked ${type} ${targetId} from project ${projectId}` }] };
+  });
+
+  server.registerTool("get_project_links", {
+    description: "Get all techniques, books, and equipment linked to a project, with cost rollup (spent vs to_spend, ARS)",
+    inputSchema: {
+      projectId: z.number().describe("Project ID"),
+    },
+  }, async ({ projectId }) => {
+    const techniques = await execute(
+      `SELECT t.* FROM techniques t JOIN project_techniques pt ON pt.technique_id = t.id WHERE pt.project_id = ?`,
+      [projectId]
+    );
+    const books = await execute(
+      `SELECT b.* FROM books b JOIN project_books pb ON pb.book_id = b.id WHERE pb.project_id = ?`,
+      [projectId]
+    );
+    const equipment = await execute(
+      `SELECT e.* FROM equipment e JOIN project_equipment pe ON pe.equipment_id = e.id WHERE pe.project_id = ?`,
+      [projectId]
+    );
+    const eqRows = equipment.rows as Array<{ purchased: number; price: number | null }>;
+    const spent = eqRows.filter((e) => e.purchased).reduce((sum, e) => sum + (e.price || 0), 0);
+    const toSpend = eqRows.filter((e) => !e.purchased).reduce((sum, e) => sum + (e.price || 0), 0);
+    return {
+      content: [{
+        type: "text",
+        text: JSON.stringify({
+          techniques: techniques.rows,
+          books: books.rows,
+          equipment: equipment.rows,
+          cost: { spent, to_spend: toSpend, total: spent + toSpend },
+        }, null, 2),
+      }],
+    };
+  });
+
   return server;
 }
 

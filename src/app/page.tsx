@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 
-type Tab = "feed" | "techniques" | "equipment" | "books";
+type Tab = "feed" | "techniques" | "equipment" | "books" | "projects";
 
 interface Technique {
   id: number;
@@ -69,6 +69,21 @@ interface FeedEntry extends Entry {
   technique_name: string;
 }
 
+interface Project {
+  id: number;
+  name: string;
+  description: string;
+  status: "planned" | "in_progress" | "completed";
+}
+
+interface ProjectEntry {
+  id: number;
+  project_id: number;
+  text: string;
+  created_at: string;
+  images: EntryImage[];
+}
+
 const DIFFICULTY_COLORS = {
   beginner: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
   intermediate: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200",
@@ -91,6 +106,12 @@ const BOOK_STATUS_COLORS = {
   want_to_read: "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200",
   reading: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200",
   read: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-200",
+};
+
+const PROJECT_STATUS_COLORS = {
+  planned: "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200",
+  in_progress: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200",
+  completed: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-200",
 };
 
 function formatLabel(s: string) {
@@ -116,19 +137,25 @@ export default function Home() {
   // Technique-specific: viewing = detail page, editModal = edit sheet
   const [viewingTechnique, setViewingTechnique] = useState<number | null>(null);
   const [editModalTechnique, setEditModalTechnique] = useState<number | null>(null);
+  // Projects
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [viewingProject, setViewingProject] = useState<number | null>(null);
+  const [editModalProject, setEditModalProject] = useState<number | null>(null);
   const { confirm, dialog: confirmDialog } = useConfirm();
 
   const fetchAll = useCallback(async () => {
-    const [t, e, b, f] = await Promise.all([
+    const [t, e, b, f, p] = await Promise.all([
       fetch("/api/techniques").then((r) => r.json()),
       fetch("/api/equipment").then((r) => r.json()),
       fetch("/api/books").then((r) => r.json()),
       fetch("/api/entries").then((r) => r.json()),
+      fetch("/api/projects").then((r) => r.json()),
     ]);
     setTechniques(t);
     setEquipment(e);
     setBooks(b);
     setFeedEntries(f);
+    setProjects(p);
     setLoading(false);
   }, []);
 
@@ -142,6 +169,8 @@ export default function Home() {
   }
 
   const isViewingTechnique = tab === "techniques" && viewingTechnique !== null;
+  const isViewingProject = tab === "projects" && viewingProject !== null;
+  const isViewingDetail = isViewingTechnique || isViewingProject;
 
   return (
     <div className="min-h-screen bg-background">
@@ -149,21 +178,21 @@ export default function Home() {
         <div className="max-w-4xl mx-auto px-4 py-6">
           <h1 className="text-2xl font-bold tracking-tight">Journey</h1>
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-            Techniques, equipment & books
+            Techniques, projects, equipment & books
           </p>
         </div>
       </header>
 
       <div className="max-w-4xl mx-auto px-4 py-6">
-        {/* Tabs - hidden when viewing technique detail */}
-        {!isViewingTechnique && (
+        {/* Tabs - hidden when viewing detail pages */}
+        {!isViewingDetail && (
           <>
-            <div className="flex gap-1 mb-6 border-b border-gray-200 dark:border-gray-800">
-              {(["feed", "techniques", "equipment", "books"] as Tab[]).map((t) => (
+            <div className="flex gap-1 mb-6 border-b border-gray-200 dark:border-gray-800 overflow-x-auto">
+              {(["feed", "techniques", "equipment", "books", "projects"] as Tab[]).map((t) => (
                 <button
                   key={t}
                   onClick={() => { setTab(t); closeForm(); }}
-                  className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+                  className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
                     tab === t
                       ? "border-foreground text-foreground"
                       : "border-transparent text-gray-500 hover:text-foreground"
@@ -181,7 +210,7 @@ export default function Home() {
                   className="px-4 py-2 bg-foreground text-background rounded-lg text-sm font-medium hover:opacity-90 transition-opacity"
                 >
                   + Add{" "}
-                  {tab === "techniques" ? "Technique" : tab === "equipment" ? "Equipment" : "Book"}
+                  {tab === "techniques" ? "Technique" : tab === "equipment" ? "Equipment" : tab === "projects" ? "Project" : "Book"}
                 </button>
               </div>
             )}
@@ -312,6 +341,48 @@ export default function Home() {
               }}
             />}
           </>
+        )}
+
+        {/* --- PROJECTS --- */}
+        {tab === "projects" && !isViewingProject && (
+          <>
+            {showForm && (
+              <ProjectForm
+                onDone={() => { closeForm(); fetchAll(); }}
+                onCancel={closeForm}
+              />
+            )}
+            {loading ? <Spinner /> : <ProjectList
+              items={projects}
+              onOpen={(id) => setViewingProject(id)}
+              onEdit={(id) => setEditModalProject(id)}
+              onDelete={async (id) => {
+                if (await confirm("Delete this project and all its entries?")) {
+                  await fetch(`/api/projects?id=${id}`, { method: "DELETE" });
+                  fetchAll();
+                }
+              }}
+            />}
+          </>
+        )}
+
+        {isViewingProject && (
+          <ProjectDetail
+            project={projects.find((p) => p.id === viewingProject)!}
+            allTechniques={techniques}
+            allBooks={books}
+            allEquipment={equipment}
+            onBack={() => setViewingProject(null)}
+            onEdit={() => setEditModalProject(viewingProject)}
+          />
+        )}
+
+        {editModalProject !== null && (
+          <EditProjectModal
+            project={projects.find((p) => p.id === editModalProject)!}
+            onSave={() => { setEditModalProject(null); fetchAll(); }}
+            onClose={() => setEditModalProject(null)}
+          />
         )}
       </div>
       {confirmDialog()}
@@ -1399,6 +1470,711 @@ function BookList({
           </div>
         )
       )}
+    </div>
+  );
+}
+
+/* ================================================================
+   PROJECTS
+   ================================================================ */
+
+function EditProjectModal({
+  project,
+  onSave,
+  onClose,
+}: {
+  project: Project;
+  onSave: () => void;
+  onClose: () => void;
+}) {
+  const [name, setName] = useState(project.name);
+  const [description, setDescription] = useState(project.description);
+  const [status, setStatus] = useState(project.status);
+  const [saving, setSaving] = useState(false);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    await fetch("/api/projects", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: project.id, name, description, status }),
+    });
+    onSave();
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center" onClick={onClose}>
+      <div className="fixed inset-0 bg-black/40" />
+      <div
+        className="relative w-full sm:max-w-lg bg-background border border-gray-200 dark:border-gray-700 rounded-t-2xl sm:rounded-2xl p-6 space-y-4 max-h-[90vh] overflow-y-auto"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between">
+          <h2 className="font-semibold text-lg">Edit Project</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-foreground text-xl leading-none">&times;</button>
+        </div>
+        <form onSubmit={submit} className="space-y-3">
+          <input className={inputClass} placeholder="Project name" value={name} onChange={(e) => setName(e.target.value)} required disabled={saving} />
+          <textarea className={inputClass} placeholder="Description" value={description} onChange={(e) => setDescription(e.target.value)} rows={2} disabled={saving} />
+          <select className={inputClass + " !w-auto"} value={status} onChange={(e) => setStatus(e.target.value as Project["status"])} disabled={saving}>
+            <option value="planned">Planned</option>
+            <option value="in_progress">In Progress</option>
+            <option value="completed">Completed</option>
+          </select>
+          <div className="flex gap-2 pt-2">
+            <button type="submit" disabled={saving} className={btnPrimary}>{saving ? "Saving..." : "Save"}</button>
+            <button type="button" onClick={onClose} disabled={saving} className={btnSecondary}>Cancel</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+type ProjectDetailTab = "entries" | "techniques" | "books" | "equipment" | "images";
+
+function ProjectDetail({
+  project,
+  allTechniques,
+  allBooks,
+  allEquipment,
+  onBack,
+  onEdit,
+}: {
+  project: Project;
+  allTechniques: Technique[];
+  allBooks: Book[];
+  allEquipment: Equipment[];
+  onBack: () => void;
+  onEdit: () => void;
+}) {
+  const [detailTab, setDetailTab] = useState<ProjectDetailTab>("entries");
+  const [entries, setEntries] = useState<ProjectEntry[]>([]);
+  const [linkedTechniques, setLinkedTechniques] = useState<Technique[]>([]);
+  const [linkedBooks, setLinkedBooks] = useState<Book[]>([]);
+  const [linkedEquipment, setLinkedEquipment] = useState<Equipment[]>([]);
+  const [costRollup, setCostRollup] = useState<CostRollup | null>(null);
+  const [images, setImages] = useState<EntryImage[]>([]);
+  const [detailLoading, setDetailLoading] = useState(true);
+  const imageInputRef = useRef<HTMLInputElement>(null);
+
+  const fetchEntries = useCallback(() => {
+    return fetch(`/api/projects/entries?projectId=${project.id}`)
+      .then((r) => r.json())
+      .then(setEntries);
+  }, [project.id]);
+
+  const fetchLinks = useCallback(() => {
+    return fetch(`/api/projects/links?projectId=${project.id}`)
+      .then((r) => r.json())
+      .then((data) => {
+        setLinkedTechniques(data.techniques);
+        setLinkedBooks(data.books);
+        setLinkedEquipment(data.equipment);
+        if (data.cost) setCostRollup(data.cost);
+      });
+  }, [project.id]);
+
+  const fetchImages = useCallback(() => {
+    return fetch(`/api/projects/images?projectId=${project.id}`)
+      .then((r) => r.json())
+      .then(setImages);
+  }, [project.id]);
+
+  useEffect(() => {
+    Promise.all([fetchEntries(), fetchLinks(), fetchImages()]).then(() => setDetailLoading(false));
+  }, [fetchEntries, fetchLinks, fetchImages]);
+
+  async function linkItem(type: "technique" | "book" | "equipment", targetId: number) {
+    await fetch("/api/projects/links", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ projectId: project.id, type, targetId }),
+    });
+    fetchLinks();
+  }
+
+  async function unlinkItem(type: "technique" | "book" | "equipment", targetId: number) {
+    await fetch(
+      `/api/projects/links?projectId=${project.id}&type=${type}&targetId=${targetId}`,
+      { method: "DELETE" }
+    );
+    fetchLinks();
+  }
+
+  const { confirm: confirmDetail, dialog: confirmDetailDialog } = useConfirm();
+
+  async function deleteEntry(entryId: number) {
+    if (!await confirmDetail("Delete this project entry?")) return;
+    await fetch(`/api/projects/entries?id=${entryId}`, { method: "DELETE" });
+    fetchEntries();
+  }
+
+  async function uploadProjectImage(file: File) {
+    const formData = new FormData();
+    formData.append("projectId", String(project.id));
+    formData.append("file", file);
+    await fetch("/api/projects/images", { method: "POST", body: formData });
+    fetchImages();
+  }
+
+  async function deleteProjectImage(imageId: number) {
+    if (!await confirmDetail("Delete this image?")) return;
+    await fetch(`/api/projects/images?id=${imageId}`, { method: "DELETE" });
+    fetchImages();
+  }
+
+  const unlinkedTechniques = allTechniques.filter((t) => !linkedTechniques.some((lt) => lt.id === t.id));
+  const unlinkedBooks = allBooks.filter((b) => !linkedBooks.some((lb) => lb.id === b.id));
+  const unlinkedEquipment = allEquipment.filter((eq) => !linkedEquipment.some((le) => le.id === eq.id));
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <button onClick={onBack} className="text-sm text-gray-500 hover:text-foreground">
+          &larr; Back
+        </button>
+        <button onClick={onEdit} className="text-xs px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded-md text-gray-500 hover:text-foreground hover:border-gray-400">
+          Edit
+        </button>
+      </div>
+
+      <div>
+        <h2 className="text-xl font-bold">{project.name}</h2>
+        {project.description && (
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{project.description}</p>
+        )}
+        <div className="flex flex-wrap gap-2 mt-2">
+          <span className={`text-xs px-2 py-0.5 rounded-full ${PROJECT_STATUS_COLORS[project.status]}`}>
+            {formatLabel(project.status)}
+          </span>
+        </div>
+        {!detailLoading && costRollup && costRollup.total > 0 && (
+          <div className="flex flex-wrap gap-4 mt-3 text-xs text-gray-500 dark:text-gray-400">
+            <span>ARS {costRollup.spent.toLocaleString()} spent{costRollup.to_spend > 0 ? ` / ${costRollup.to_spend.toLocaleString()} pending` : ""}</span>
+          </div>
+        )}
+      </div>
+
+      {/* Detail tabs */}
+      <div className="flex gap-1 border-b border-gray-200 dark:border-gray-800 overflow-x-auto">
+        {(["entries", "techniques", "books", "equipment", "images"] as ProjectDetailTab[]).map((t) => (
+          <button
+            key={t}
+            onClick={() => setDetailTab(t)}
+            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
+              detailTab === t
+                ? "border-foreground text-foreground"
+                : "border-transparent text-gray-500 hover:text-foreground"
+            }`}
+          >
+            {formatLabel(t)}
+          </button>
+        ))}
+      </div>
+
+      {detailLoading ? <Spinner /> : <>
+      {/* ENTRIES TAB */}
+      {detailTab === "entries" && (
+        <div className="space-y-4">
+          <NewProjectEntryForm projectId={project.id} onCreated={fetchEntries} />
+          {entries.length === 0 && (
+            <p className="text-sm text-gray-400 text-center py-6">No entries yet. Add your first one above.</p>
+          )}
+          <div className="space-y-4">
+            {entries.map((entry) => (
+              <ProjectEntryCard key={entry.id} entry={entry} onDelete={() => deleteEntry(entry.id)} onUpdated={fetchEntries} />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* TECHNIQUES TAB */}
+      {detailTab === "techniques" && (
+        <div className="space-y-3">
+          {linkedTechniques.length === 0 && (
+            <p className="text-sm text-gray-400">No techniques linked yet.</p>
+          )}
+          <div className="space-y-2">
+            {linkedTechniques.map((t) => (
+              <div key={t.id} className="flex items-center justify-between py-2 px-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                <div className="space-y-1">
+                  <span className="text-sm font-medium">{t.name}</span>
+                  <div className="flex gap-2">
+                    <span className={`text-xs px-2 py-0.5 rounded-full ${STATUS_COLORS[t.status]}`}>
+                      {formatLabel(t.status)}
+                    </span>
+                  </div>
+                </div>
+                <button onClick={() => unlinkItem("technique", t.id)} className="text-xs text-red-500 hover:text-red-700">
+                  Unlink
+                </button>
+              </div>
+            ))}
+          </div>
+          {unlinkedTechniques.length > 0 && (
+            <select
+              className={inputClass + " !w-auto"}
+              defaultValue=""
+              onChange={(e) => {
+                if (e.target.value) {
+                  linkItem("technique", Number(e.target.value));
+                  e.target.value = "";
+                }
+              }}
+            >
+              <option value="" disabled>Link a technique...</option>
+              {unlinkedTechniques.map((t) => (
+                <option key={t.id} value={t.id}>{t.name}</option>
+              ))}
+            </select>
+          )}
+        </div>
+      )}
+
+      {/* BOOKS TAB */}
+      {detailTab === "books" && (
+        <div className="space-y-3">
+          {linkedBooks.length === 0 && (
+            <p className="text-sm text-gray-400">No books linked yet.</p>
+          )}
+          <div className="space-y-2">
+            {linkedBooks.map((b) => (
+              <div key={b.id} className="flex items-center justify-between py-2 px-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                <span className="text-sm">
+                  {b.title} {b.author && <span className="text-gray-400">by {b.author}</span>}
+                </span>
+                <button onClick={() => unlinkItem("book", b.id)} className="text-xs text-red-500 hover:text-red-700">
+                  Unlink
+                </button>
+              </div>
+            ))}
+          </div>
+          {unlinkedBooks.length > 0 && (
+            <select
+              className={inputClass + " !w-auto"}
+              defaultValue=""
+              onChange={(e) => {
+                if (e.target.value) {
+                  linkItem("book", Number(e.target.value));
+                  e.target.value = "";
+                }
+              }}
+            >
+              <option value="" disabled>Link a book...</option>
+              {unlinkedBooks.map((b) => (
+                <option key={b.id} value={b.id}>{b.title}</option>
+              ))}
+            </select>
+          )}
+        </div>
+      )}
+
+      {/* EQUIPMENT TAB */}
+      {detailTab === "equipment" && (
+        <div className="space-y-3">
+          {linkedEquipment.length === 0 && (
+            <p className="text-sm text-gray-400">No equipment linked yet.</p>
+          )}
+          <div className="space-y-2">
+            {linkedEquipment.map((eq) => (
+              <div key={eq.id} className="flex items-center justify-between py-2 px-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                <span className="text-sm">{eq.name}</span>
+                <button onClick={() => unlinkItem("equipment", eq.id)} className="text-xs text-red-500 hover:text-red-700">
+                  Unlink
+                </button>
+              </div>
+            ))}
+          </div>
+          {unlinkedEquipment.length > 0 && (
+            <select
+              className={inputClass + " !w-auto"}
+              defaultValue=""
+              onChange={(e) => {
+                if (e.target.value) {
+                  linkItem("equipment", Number(e.target.value));
+                  e.target.value = "";
+                }
+              }}
+            >
+              <option value="" disabled>Link equipment...</option>
+              {unlinkedEquipment.map((eq) => (
+                <option key={eq.id} value={eq.id}>{eq.name}</option>
+              ))}
+            </select>
+          )}
+        </div>
+      )}
+
+      {/* IMAGES TAB */}
+      {detailTab === "images" && (
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            {images.map((img) => (
+              <div key={img.id} className="relative group">
+                <img
+                  src={img.url}
+                  alt={img.original_name}
+                  className="w-full h-40 object-cover rounded-lg border border-gray-200 dark:border-gray-700"
+                />
+                <button
+                  onClick={() => deleteProjectImage(img.id)}
+                  className="absolute top-2 right-2 w-6 h-6 bg-red-500 text-white rounded-full text-xs opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"
+                >
+                  X
+                </button>
+                <p className="text-xs text-gray-400 mt-1 truncate">{img.original_name}</p>
+              </div>
+            ))}
+          </div>
+          {images.length === 0 && (
+            <p className="text-sm text-gray-400 text-center py-6">No images yet.</p>
+          )}
+          <input
+            ref={imageInputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) {
+                uploadProjectImage(file);
+                e.target.value = "";
+              }
+            }}
+          />
+          <button
+            type="button"
+            onClick={() => imageInputRef.current?.click()}
+            className={btnSecondary}
+          >
+            Upload Image
+          </button>
+        </div>
+      )}
+      </>}
+      {confirmDetailDialog()}
+    </div>
+  );
+}
+
+function NewProjectEntryForm({
+  projectId,
+  onCreated,
+}: {
+  projectId: number;
+  onCreated: () => void;
+}) {
+  const [text, setText] = useState("");
+  const [files, setFiles] = useState<File[]>([]);
+  const [submitting, setSubmitting] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!text.trim() && files.length === 0) return;
+    setSubmitting(true);
+    const formData = new FormData();
+    formData.append("projectId", String(projectId));
+    formData.append("text", text);
+    for (const file of files) {
+      formData.append("files", file);
+    }
+    await fetch("/api/projects/entries", { method: "POST", body: formData });
+    setText("");
+    setFiles([]);
+    setSubmitting(false);
+    onCreated();
+  }
+
+  function removeFile(index: number) {
+    setFiles((prev) => prev.filter((_, i) => i !== index));
+  }
+
+  return (
+    <form onSubmit={submit} className="p-4 border border-gray-200 dark:border-gray-700 rounded-lg space-y-3">
+      <textarea
+        className={inputClass}
+        placeholder="What did you work on? How did it go?"
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        rows={3}
+      />
+      {files.length > 0 && (
+        <div className="flex gap-2 flex-wrap">
+          {files.map((file, i) => (
+            <div key={i} className="relative">
+              <img
+                src={URL.createObjectURL(file)}
+                alt={file.name}
+                className="w-20 h-20 object-cover rounded border border-gray-300 dark:border-gray-600"
+              />
+              <button
+                type="button"
+                onClick={() => removeFile(i)}
+                className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-red-500 text-white rounded-full text-xs flex items-center justify-center"
+              >
+                X
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="flex gap-2 items-center">
+        <button type="submit" disabled={submitting} className={btnPrimary}>
+          {submitting ? "Saving..." : "Add Entry"}
+        </button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          multiple
+          className="hidden"
+          onChange={(e) => {
+            if (e.target.files) {
+              setFiles((prev) => [...prev, ...Array.from(e.target.files!)]);
+              e.target.value = "";
+            }
+          }}
+        />
+        <button type="button" onClick={() => fileInputRef.current?.click()} className={btnSecondary}>
+          Attach Images
+        </button>
+      </div>
+    </form>
+  );
+}
+
+function ProjectEntryCard({ entry, onDelete, onUpdated }: { entry: ProjectEntry; onDelete: () => void; onUpdated: () => void }) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+  const [editingText, setEditingText] = useState(false);
+  const [text, setText] = useState(entry.text);
+  const [savingText, setSavingText] = useState(false);
+  const { confirm: confirmImg, dialog: confirmImgDialog } = useConfirm();
+
+  const date = new Date(entry.created_at + "Z");
+  const dateStr = date.toLocaleDateString("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+
+  async function attachImages(files: FileList) {
+    setUploading(true);
+    const formData = new FormData();
+    formData.append("entryId", String(entry.id));
+    for (const file of Array.from(files)) {
+      formData.append("files", file);
+    }
+    await fetch("/api/projects/entries/images", { method: "POST", body: formData });
+    setUploading(false);
+    onUpdated();
+  }
+
+  async function removeImage(imageId: number) {
+    if (!await confirmImg("Delete this image?")) return;
+    await fetch(`/api/projects/entries/images?id=${imageId}`, { method: "DELETE" });
+    onUpdated();
+  }
+
+  async function saveText() {
+    setSavingText(true);
+    await fetch("/api/projects/entries/text", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: entry.id, text }),
+    });
+    setSavingText(false);
+    setEditingText(false);
+    onUpdated();
+  }
+
+  return (
+    <div className="p-4 border border-gray-200 dark:border-gray-700 rounded-lg space-y-3">
+      <div className="flex items-start justify-between">
+        <time className="text-xs text-gray-400">{dateStr}</time>
+        <div className="flex gap-2">
+          <button onClick={() => setEditingText(!editingText)} className="text-xs text-gray-500 hover:text-foreground">
+            {editingText ? "Cancel" : "Edit"}
+          </button>
+          <button onClick={onDelete} className="text-xs text-red-500 hover:text-red-700">
+            Delete
+          </button>
+        </div>
+      </div>
+
+      {editingText ? (
+        <div className="space-y-2">
+          <textarea
+            className={inputClass}
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            rows={3}
+            disabled={savingText}
+          />
+          <button onClick={saveText} disabled={savingText} className={btnPrimary + " text-xs !px-3 !py-1.5"}>
+            {savingText ? "Saving..." : "Save"}
+          </button>
+        </div>
+      ) : (
+        entry.text && <p className="text-sm whitespace-pre-wrap">{entry.text}</p>
+      )}
+
+      {entry.images.length > 0 && (
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+          {entry.images.map((img) => (
+            <div key={img.id} className="relative group">
+              <img
+                src={img.url}
+                alt={img.original_name}
+                className="w-full h-40 object-cover rounded-lg border border-gray-200 dark:border-gray-700"
+              />
+              <button
+                onClick={() => removeImage(img.id)}
+                className="absolute top-2 right-2 w-6 h-6 bg-red-500 text-white rounded-full text-xs opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"
+              >
+                X
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          multiple
+          className="hidden"
+          onChange={(e) => {
+            if (e.target.files && e.target.files.length > 0) {
+              attachImages(e.target.files);
+              e.target.value = "";
+            }
+          }}
+        />
+        <button
+          type="button"
+          disabled={uploading}
+          onClick={() => fileInputRef.current?.click()}
+          className="text-xs px-2 py-1 text-gray-500 hover:text-foreground border border-gray-300 dark:border-gray-600 rounded"
+        >
+          {uploading ? "Uploading..." : "Attach Images"}
+        </button>
+      </div>
+      {confirmImgDialog()}
+    </div>
+  );
+}
+
+function ProjectForm({ onDone, onCancel }: { onDone: () => void; onCancel: () => void }) {
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [status, setStatus] = useState<Project["status"]>("planned");
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    await fetch("/api/projects", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, description, status }),
+    });
+    onDone();
+  }
+
+  return (
+    <form onSubmit={submit} className="mb-6 p-4 border border-gray-200 dark:border-gray-700 rounded-lg space-y-3">
+      <input className={inputClass} placeholder="Project name" value={name} onChange={(e) => setName(e.target.value)} required />
+      <textarea className={inputClass} placeholder="Description (optional)" value={description} onChange={(e) => setDescription(e.target.value)} rows={2} />
+      <select className={inputClass + " !w-auto"} value={status} onChange={(e) => setStatus(e.target.value as Project["status"])}>
+        <option value="planned">Planned</option>
+        <option value="in_progress">In Progress</option>
+        <option value="completed">Completed</option>
+      </select>
+      <div className="flex gap-2">
+        <button type="submit" className={btnPrimary}>Add</button>
+        <button type="button" onClick={onCancel} className={btnSecondary}>Cancel</button>
+      </div>
+    </form>
+  );
+}
+
+function ProjectList({
+  items,
+  onOpen,
+  onEdit,
+  onDelete,
+}: {
+  items: Project[];
+  onOpen: (id: number) => void;
+  onEdit: (id: number) => void;
+  onDelete: (id: number) => void;
+}) {
+  const [filterStatus, setFilterStatus] = useState<string>("");
+  const statuses = [...new Set(items.map((p) => p.status))];
+  const filtered = filterStatus ? items.filter((p) => p.status === filterStatus) : items;
+
+  if (items.length === 0) return <EmptyState label="projects" />;
+  return (
+    <div className="space-y-3">
+      {statuses.length > 1 && (
+        <div className="flex flex-wrap gap-1.5">
+          <button
+            onClick={() => setFilterStatus("")}
+            className={`text-xs px-2 py-1 rounded-full border transition-colors ${!filterStatus ? "bg-foreground text-background border-foreground" : "border-gray-300 dark:border-gray-600 text-gray-500"}`}
+          >
+            All
+          </button>
+          {statuses.map((s) => (
+            <button
+              key={s}
+              onClick={() => setFilterStatus(filterStatus === s ? "" : s)}
+              className={`text-xs px-2 py-1 rounded-full border transition-colors ${filterStatus === s ? PROJECT_STATUS_COLORS[s] + " border-current" : "border-gray-300 dark:border-gray-600 text-gray-500"}`}
+            >
+              {formatLabel(s)}
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="space-y-2">
+        {filtered.map((p) => (
+          <div
+            key={p.id}
+            onClick={() => onOpen(p.id)}
+            className="flex items-start justify-between p-4 border border-gray-200 dark:border-gray-700 rounded-lg cursor-pointer hover:border-gray-400 dark:hover:border-gray-500 transition-colors"
+          >
+            <div className="space-y-1">
+              <div className="font-medium">{p.name}</div>
+              {p.description && <div className="text-sm text-gray-500 dark:text-gray-400">{p.description}</div>}
+              <div className="flex flex-wrap gap-2 mt-1">
+                <span className={`text-xs px-2 py-0.5 rounded-full ${PROJECT_STATUS_COLORS[p.status]}`}>
+                  {formatLabel(p.status)}
+                </span>
+              </div>
+            </div>
+            <div className="flex gap-1 shrink-0 ml-4">
+              <button
+                onClick={(e) => { e.stopPropagation(); onEdit(p.id); }}
+                className="text-xs px-2 py-1 text-gray-500 hover:text-foreground"
+              >
+                Edit
+              </button>
+              <button
+                onClick={(e) => { e.stopPropagation(); onDelete(p.id); }}
+                className="text-xs px-2 py-1 text-red-500 hover:text-red-700"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
