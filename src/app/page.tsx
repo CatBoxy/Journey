@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 
-type Tab = "feed" | "techniques" | "equipment" | "books" | "projects";
+type Tab = "feed" | "techniques" | "equipment" | "books" | "projects" | "accounting";
 
 interface Technique {
   id: number;
@@ -84,6 +84,68 @@ interface ProjectEntry {
   images: EntryImage[];
 }
 
+type AccountingSubTab = "treasury" | "expenses" | "sales" | "products";
+
+interface Product {
+  id: number;
+  name: string;
+  description: string;
+  materials: string;
+  currency: string;
+  status: "in_progress" | "completed" | "sold";
+}
+
+interface Expense {
+  id: number;
+  description: string;
+  amount: number;
+  currency: string;
+  category: string;
+  date: string;
+  notes: string;
+}
+
+interface Sale {
+  id: number;
+  product_id: number | null;
+  product_name: string | null;
+  description: string;
+  amount: number;
+  currency: string;
+  customer: string;
+  notes: string;
+  date: string;
+}
+
+interface Treasury {
+  expenses_ars: number;
+  expenses_usd: number;
+  sales_ars: number;
+  sales_usd: number;
+  net_ars: number;
+  net_usd: number;
+  monthly_target_ars?: number;
+  monthly_target_usd?: number;
+  months?: number;
+}
+
+interface ProductWorkEntry {
+  id: number;
+  product_id: number;
+  text: string;
+  minutes_spent: number | null;
+  created_at: string;
+  images: EntryImage[];
+}
+
+interface ProductTimeStats {
+  total_minutes: number;
+  total_entry_count: number;
+  tracked_entry_count: number;
+  first_entry: string | null;
+  last_entry: string | null;
+}
+
 const DIFFICULTY_COLORS = {
   beginner: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
   intermediate: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200",
@@ -114,6 +176,21 @@ const PROJECT_STATUS_COLORS = {
   completed: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-200",
 };
 
+const PRODUCT_STATUS_COLORS = {
+  in_progress: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200",
+  completed: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-200",
+  sold: "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200",
+};
+
+const EXPENSE_CATEGORY_COLORS: Record<string, string> = {
+  materials: "bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200",
+  tools: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200",
+  courses: "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200",
+  shipping: "bg-cyan-100 text-cyan-800 dark:bg-cyan-900 dark:text-cyan-200",
+  packaging: "bg-pink-100 text-pink-800 dark:bg-pink-900 dark:text-pink-200",
+  other: "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200",
+};
+
 function formatLabel(s: string) {
   return s.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
@@ -141,21 +218,37 @@ export default function Home() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [viewingProject, setViewingProject] = useState<number | null>(null);
   const [editModalProject, setEditModalProject] = useState<number | null>(null);
+  // Accounting
+  const [accountingSubTab, setAccountingSubTab] = useState<AccountingSubTab>("treasury");
+  const [acctProducts, setAcctProducts] = useState<Product[]>([]);
+  const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [sales, setSales] = useState<Sale[]>([]);
+  const [treasury, setTreasury] = useState<Treasury | null>(null);
+  const [viewingProduct, setViewingProduct] = useState<number | null>(null);
+  const [editModalProduct, setEditModalProduct] = useState<number | null>(null);
   const { confirm, dialog: confirmDialog } = useConfirm();
 
   const fetchAll = useCallback(async () => {
-    const [t, e, b, f, p] = await Promise.all([
+    const [t, e, b, f, p, prod, exp, sal, tres] = await Promise.all([
       fetch("/api/techniques").then((r) => r.json()),
       fetch("/api/equipment").then((r) => r.json()),
       fetch("/api/books").then((r) => r.json()),
       fetch("/api/entries").then((r) => r.json()),
       fetch("/api/projects").then((r) => r.json()),
+      fetch("/api/products").then((r) => r.json()),
+      fetch("/api/expenses").then((r) => r.json()),
+      fetch("/api/sales").then((r) => r.json()),
+      fetch("/api/treasury").then((r) => r.json()),
     ]);
     setTechniques(t);
     setEquipment(e);
     setBooks(b);
     setFeedEntries(f);
     setProjects(p);
+    setAcctProducts(prod);
+    setExpenses(exp);
+    setSales(sal);
+    setTreasury(tres);
     setLoading(false);
   }, []);
 
@@ -170,7 +263,8 @@ export default function Home() {
 
   const isViewingTechnique = tab === "techniques" && viewingTechnique !== null;
   const isViewingProject = tab === "projects" && viewingProject !== null;
-  const isViewingDetail = isViewingTechnique || isViewingProject;
+  const isViewingProduct = tab === "accounting" && viewingProduct !== null;
+  const isViewingDetail = isViewingTechnique || isViewingProject || isViewingProduct;
 
   return (
     <div className="min-h-screen bg-background">
@@ -199,7 +293,7 @@ export default function Home() {
         {!isViewingDetail && (
           <>
             <div className="flex gap-1 mb-6 border-b border-gray-200 dark:border-gray-800 overflow-x-auto">
-              {(["feed", "techniques", "equipment", "books", "projects"] as Tab[]).map((t) => (
+              {(["feed", "techniques", "equipment", "books", "projects", "accounting"] as Tab[]).map((t) => (
                 <button
                   key={t}
                   onClick={() => { setTab(t); closeForm(); }}
@@ -214,14 +308,14 @@ export default function Home() {
               ))}
             </div>
 
-            {tab !== "feed" && (
+            {tab !== "feed" && !(tab === "accounting" && accountingSubTab === "treasury") && (
               <div className="flex justify-end mb-4">
                 <button
                   onClick={() => { setShowForm(true); setEditing(null); }}
                   className="px-4 py-2 bg-foreground text-background rounded-lg text-sm font-medium hover:opacity-90 transition-opacity"
                 >
                   + Add{" "}
-                  {tab === "techniques" ? "Technique" : tab === "equipment" ? "Equipment" : tab === "projects" ? "Project" : "Book"}
+                  {tab === "techniques" ? "Technique" : tab === "equipment" ? "Equipment" : tab === "projects" ? "Project" : tab === "accounting" ? (accountingSubTab === "expenses" ? "Expense" : accountingSubTab === "sales" ? "Sale" : "Product") : "Book"}
                 </button>
               </div>
             )}
@@ -393,6 +487,126 @@ export default function Home() {
             project={projects.find((p) => p.id === editModalProject)!}
             onSave={() => { setEditModalProject(null); fetchAll(); }}
             onClose={() => setEditModalProject(null)}
+          />
+        )}
+
+        {/* --- ACCOUNTING --- */}
+        {tab === "accounting" && !isViewingProduct && (
+          <>
+            {/* Sub-tab navigation */}
+            <div className="flex gap-1 mb-6 border-b border-gray-200 dark:border-gray-800">
+              {(["treasury", "expenses", "sales", "products"] as AccountingSubTab[]).map((st) => (
+                <button
+                  key={st}
+                  onClick={() => { setAccountingSubTab(st); closeForm(); }}
+                  className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
+                    accountingSubTab === st
+                      ? "border-foreground text-foreground"
+                      : "border-transparent text-gray-500 hover:text-foreground"
+                  }`}
+                >
+                  {formatLabel(st)}
+                </button>
+              ))}
+            </div>
+
+            {/* TREASURY SUB-TAB */}
+            {accountingSubTab === "treasury" && (
+              loading ? <Spinner /> : (
+                <TreasuryView treasury={treasury} />
+              )
+            )}
+
+            {/* EXPENSES SUB-TAB */}
+            {accountingSubTab === "expenses" && (
+              <>
+                {showForm && editing === null && (
+                  <ExpenseForm
+                    onDone={() => { closeForm(); fetchAll(); }}
+                    onCancel={closeForm}
+                  />
+                )}
+                {loading ? <Spinner /> : <ExpenseList
+                  items={expenses}
+                  editingId={editing}
+                  onEdit={(id) => { setEditing(id); setShowForm(true); }}
+                  onCancelEdit={closeForm}
+                  onSaveEdit={() => { closeForm(); fetchAll(); }}
+                  onDelete={async (id) => {
+                    if (await confirm("Delete this expense?")) {
+                      await fetch(`/api/expenses?id=${id}`, { method: "DELETE" });
+                      fetchAll();
+                    }
+                  }}
+                />}
+              </>
+            )}
+
+            {/* SALES SUB-TAB */}
+            {accountingSubTab === "sales" && (
+              <>
+                {showForm && editing === null && (
+                  <SaleForm
+                    products={acctProducts}
+                    onDone={() => { closeForm(); fetchAll(); }}
+                    onCancel={closeForm}
+                  />
+                )}
+                {loading ? <Spinner /> : <SaleList
+                  items={sales}
+                  editingId={editing}
+                  products={acctProducts}
+                  onEdit={(id) => { setEditing(id); setShowForm(true); }}
+                  onCancelEdit={closeForm}
+                  onSaveEdit={() => { closeForm(); fetchAll(); }}
+                  onDelete={async (id) => {
+                    if (await confirm("Delete this sale?")) {
+                      await fetch(`/api/sales?id=${id}`, { method: "DELETE" });
+                      fetchAll();
+                    }
+                  }}
+                />}
+              </>
+            )}
+
+            {/* PRODUCTS SUB-TAB */}
+            {accountingSubTab === "products" && (
+              <>
+                {showForm && (
+                  <ProductForm
+                    onDone={() => { closeForm(); fetchAll(); }}
+                    onCancel={closeForm}
+                  />
+                )}
+                {loading ? <Spinner /> : <ProductList
+                  items={acctProducts}
+                  onOpen={(id) => setViewingProduct(id)}
+                  onEdit={(id) => setEditModalProduct(id)}
+                  onDelete={async (id) => {
+                    if (await confirm("Delete this product and all its work entries?")) {
+                      await fetch(`/api/products?id=${id}`, { method: "DELETE" });
+                      fetchAll();
+                    }
+                  }}
+                />}
+              </>
+            )}
+          </>
+        )}
+
+        {isViewingProduct && (
+          <ProductDetail
+            product={acctProducts.find((p) => p.id === viewingProduct)!}
+            onBack={() => setViewingProduct(null)}
+            onEdit={() => setEditModalProduct(viewingProduct)}
+          />
+        )}
+
+        {editModalProduct !== null && (
+          <EditProductModal
+            product={acctProducts.find((p) => p.id === editModalProduct)!}
+            onSave={() => { setEditModalProduct(null); fetchAll(); }}
+            onClose={() => setEditModalProduct(null)}
           />
         )}
       </div>
@@ -2186,6 +2400,923 @@ function ProjectList({
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+/* ================================================================
+   ACCOUNTING — Treasury View
+   ================================================================ */
+
+function TreasuryView({ treasury }: { treasury: Treasury | null }) {
+  const [months, setMonths] = useState("");
+
+  if (!treasury) return <p className="text-sm text-gray-400 text-center py-12">No accounting data yet.</p>;
+
+  const m = Number(months);
+  const deficitArs = treasury.net_ars < 0 ? Math.abs(treasury.net_ars) : 0;
+  const deficitUsd = treasury.net_usd < 0 ? Math.abs(treasury.net_usd) : 0;
+  const targetArs = m > 0 && deficitArs > 0 ? Math.ceil(deficitArs / m) : 0;
+  const targetUsd = m > 0 && deficitUsd > 0 ? Math.ceil(deficitUsd / m) : 0;
+
+  return (
+    <div className="space-y-6">
+      {/* Summary cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div className="p-4 border border-gray-200 dark:border-gray-700 rounded-lg">
+          <p className="text-xs text-gray-500 uppercase tracking-wide">Expenses</p>
+          <p className="text-lg font-bold mt-1">ARS {treasury.expenses_ars.toLocaleString()}</p>
+          {treasury.expenses_usd > 0 && <p className="text-sm text-gray-500">USD {treasury.expenses_usd.toLocaleString()}</p>}
+        </div>
+        <div className="p-4 border border-gray-200 dark:border-gray-700 rounded-lg">
+          <p className="text-xs text-gray-500 uppercase tracking-wide">Sales</p>
+          <p className="text-lg font-bold mt-1">ARS {treasury.sales_ars.toLocaleString()}</p>
+          {treasury.sales_usd > 0 && <p className="text-sm text-gray-500">USD {treasury.sales_usd.toLocaleString()}</p>}
+        </div>
+        <div className="p-4 border border-gray-200 dark:border-gray-700 rounded-lg">
+          <p className="text-xs text-gray-500 uppercase tracking-wide">Net Balance</p>
+          <p className={`text-lg font-bold mt-1 ${treasury.net_ars >= 0 ? "text-emerald-600" : "text-red-600"}`}>
+            ARS {treasury.net_ars.toLocaleString()}
+          </p>
+          {(treasury.net_usd !== 0) && (
+            <p className={`text-sm ${treasury.net_usd >= 0 ? "text-emerald-600" : "text-red-600"}`}>
+              USD {treasury.net_usd.toLocaleString()}
+            </p>
+          )}
+        </div>
+      </div>
+
+      {/* Break-even calculator */}
+      <div className="p-4 border border-gray-200 dark:border-gray-700 rounded-lg space-y-3">
+        <p className="text-xs text-gray-500 uppercase tracking-wide">Break-Even Calculator</p>
+        {deficitArs === 0 && deficitUsd === 0 ? (
+          <p className="text-sm text-emerald-600 font-medium">You&apos;ve already broken even!</p>
+        ) : (
+          <>
+            <p className="text-sm text-gray-500">
+              You need to recover{" "}
+              {deficitArs > 0 && <span className="font-medium">ARS {deficitArs.toLocaleString()}</span>}
+              {deficitArs > 0 && deficitUsd > 0 && " and "}
+              {deficitUsd > 0 && <span className="font-medium">USD {deficitUsd.toLocaleString()}</span>}
+              . Over how many months?
+            </p>
+            <div className="flex items-end gap-3">
+              <div className="space-y-1">
+                <label className="text-xs text-gray-500">Months</label>
+                <input
+                  className={inputClass + " !w-24"}
+                  type="number"
+                  min="1"
+                  placeholder="e.g. 6"
+                  value={months}
+                  onChange={(e) => setMonths(e.target.value)}
+                />
+              </div>
+              {m > 0 && (
+                <div className="text-sm pb-2 space-y-0.5">
+                  {targetArs > 0 && <p>Sell <span className="font-medium text-foreground">ARS {targetArs.toLocaleString()}/mo</span></p>}
+                  {targetUsd > 0 && <p>Sell <span className="font-medium text-foreground">USD {targetUsd.toLocaleString()}/mo</span></p>}
+                </div>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ================================================================
+   ACCOUNTING — Expenses
+   ================================================================ */
+
+function ExpenseForm({
+  item,
+  onDone,
+  onCancel,
+}: {
+  item?: Expense;
+  onDone: () => void;
+  onCancel: () => void;
+}) {
+  const [description, setDescription] = useState(item?.description || "");
+  const [amount, setAmount] = useState(item?.amount != null ? String(item.amount) : "");
+  const [currency, setCurrency] = useState(item?.currency || "ARS");
+  const [category, setCategory] = useState(item?.category || "materials");
+  const [date, setDate] = useState(item?.date || new Date().toISOString().split("T")[0]);
+  const [notes, setNotes] = useState(item?.notes || "");
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    const method = item ? "PUT" : "POST";
+    await fetch("/api/expenses", {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: item?.id, description, amount: Number(amount), currency, category, date, notes }),
+    });
+    onDone();
+  }
+
+  return (
+    <form onSubmit={submit} className="mb-6 p-4 border border-blue-300 dark:border-blue-700 rounded-lg space-y-3 bg-blue-50/30 dark:bg-blue-950/20">
+      <input className={inputClass} placeholder="Description" value={description} onChange={(e) => setDescription(e.target.value)} required />
+      <div className="flex gap-3">
+        <input className={inputClass + " !w-32"} type="number" min="0" step="0.01" placeholder="Amount" value={amount} onChange={(e) => setAmount(e.target.value)} required />
+        <select className={inputClass + " !w-auto"} value={currency} onChange={(e) => setCurrency(e.target.value)}>
+          <option value="ARS">ARS</option>
+          <option value="USD">USD</option>
+        </select>
+        <select className={inputClass + " !w-auto"} value={category} onChange={(e) => setCategory(e.target.value)}>
+          <option value="materials">Materials</option>
+          <option value="tools">Tools</option>
+          <option value="courses">Courses</option>
+          <option value="shipping">Shipping</option>
+          <option value="packaging">Packaging</option>
+          <option value="other">Other</option>
+        </select>
+      </div>
+      <input className={inputClass + " !w-auto"} type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+      <textarea className={inputClass} placeholder="Notes (optional)" value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} />
+      <div className="flex gap-2">
+        <button type="submit" className={btnPrimary}>{item ? "Update" : "Add"}</button>
+        <button type="button" onClick={onCancel} className={btnSecondary}>Cancel</button>
+      </div>
+    </form>
+  );
+}
+
+function ExpenseList({
+  items,
+  editingId,
+  onEdit,
+  onCancelEdit,
+  onSaveEdit,
+  onDelete,
+}: {
+  items: Expense[];
+  editingId: number | null;
+  onEdit: (id: number) => void;
+  onCancelEdit: () => void;
+  onSaveEdit: () => void;
+  onDelete: (id: number) => void;
+}) {
+  if (items.length === 0) return <EmptyState label="expenses" />;
+  return (
+    <div className="space-y-2">
+      {items.map((exp) =>
+        editingId === exp.id ? (
+          <ExpenseForm key={exp.id} item={exp} onDone={onSaveEdit} onCancel={onCancelEdit} />
+        ) : (
+          <div key={exp.id} className="flex items-start justify-between p-4 border border-gray-200 dark:border-gray-700 rounded-lg">
+            <div className="space-y-1">
+              <div className="font-medium">{exp.description}</div>
+              <div className="text-sm font-mono">{exp.currency} {exp.amount.toLocaleString()}</div>
+              {exp.notes && <div className="text-sm text-gray-500 dark:text-gray-400">{exp.notes}</div>}
+              <div className="flex flex-wrap gap-2 mt-1">
+                <span className={`text-xs px-2 py-0.5 rounded-full ${EXPENSE_CATEGORY_COLORS[exp.category] || EXPENSE_CATEGORY_COLORS.other}`}>
+                  {formatLabel(exp.category)}
+                </span>
+                <span className="text-xs text-gray-400">{exp.date}</span>
+              </div>
+            </div>
+            <div className="flex gap-1 shrink-0 ml-4">
+              <button onClick={() => onEdit(exp.id)} className="text-xs px-2 py-1 text-gray-500 hover:text-foreground">Edit</button>
+              <button onClick={() => onDelete(exp.id)} className="text-xs px-2 py-1 text-red-500 hover:text-red-700">Delete</button>
+            </div>
+          </div>
+        )
+      )}
+    </div>
+  );
+}
+
+/* ================================================================
+   ACCOUNTING — Sales
+   ================================================================ */
+
+function SaleForm({
+  item,
+  products,
+  onDone,
+  onCancel,
+}: {
+  item?: Sale;
+  products: Product[];
+  onDone: () => void;
+  onCancel: () => void;
+}) {
+  const [description, setDescription] = useState(item?.description || "");
+  const [amount, setAmount] = useState(item?.amount != null ? String(item.amount) : "");
+  const [currency, setCurrency] = useState(item?.currency || "ARS");
+  const [productId, setProductId] = useState<string>(item?.product_id != null ? String(item.product_id) : "");
+  const [customer, setCustomer] = useState(item?.customer || "");
+  const [notes, setNotes] = useState(item?.notes || "");
+  const [date, setDate] = useState(item?.date || new Date().toISOString().split("T")[0]);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    const method = item ? "PUT" : "POST";
+    await fetch("/api/sales", {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id: item?.id,
+        description,
+        amount: Number(amount),
+        currency,
+        product_id: productId ? Number(productId) : null,
+        customer,
+        notes,
+        date,
+      }),
+    });
+    onDone();
+  }
+
+  return (
+    <form onSubmit={submit} className="mb-6 p-4 border border-blue-300 dark:border-blue-700 rounded-lg space-y-3 bg-blue-50/30 dark:bg-blue-950/20">
+      <input className={inputClass} placeholder="Description" value={description} onChange={(e) => setDescription(e.target.value)} required />
+      <div className="flex gap-3">
+        <input className={inputClass + " !w-32"} type="number" min="0" step="0.01" placeholder="Amount" value={amount} onChange={(e) => setAmount(e.target.value)} required />
+        <select className={inputClass + " !w-auto"} value={currency} onChange={(e) => setCurrency(e.target.value)}>
+          <option value="ARS">ARS</option>
+          <option value="USD">USD</option>
+        </select>
+      </div>
+      <select className={inputClass + " !w-auto"} value={productId} onChange={(e) => setProductId(e.target.value)}>
+        <option value="">No product linked</option>
+        {products.map((p) => (
+          <option key={p.id} value={p.id}>{p.name}</option>
+        ))}
+      </select>
+      <input className={inputClass} placeholder="Customer (optional)" value={customer} onChange={(e) => setCustomer(e.target.value)} />
+      <input className={inputClass + " !w-auto"} type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+      <textarea className={inputClass} placeholder="Notes (optional)" value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} />
+      <div className="flex gap-2">
+        <button type="submit" className={btnPrimary}>{item ? "Update" : "Add"}</button>
+        <button type="button" onClick={onCancel} className={btnSecondary}>Cancel</button>
+      </div>
+    </form>
+  );
+}
+
+function SaleList({
+  items,
+  editingId,
+  products,
+  onEdit,
+  onCancelEdit,
+  onSaveEdit,
+  onDelete,
+}: {
+  items: Sale[];
+  editingId: number | null;
+  products: Product[];
+  onEdit: (id: number) => void;
+  onCancelEdit: () => void;
+  onSaveEdit: () => void;
+  onDelete: (id: number) => void;
+}) {
+  if (items.length === 0) return <EmptyState label="sales" />;
+  return (
+    <div className="space-y-2">
+      {items.map((sale) =>
+        editingId === sale.id ? (
+          <SaleForm key={sale.id} item={sale} products={products} onDone={onSaveEdit} onCancel={onCancelEdit} />
+        ) : (
+          <div key={sale.id} className="flex items-start justify-between p-4 border border-gray-200 dark:border-gray-700 rounded-lg">
+            <div className="space-y-1">
+              <div className="font-medium">{sale.description}</div>
+              <div className="text-sm font-mono">{sale.currency} {sale.amount.toLocaleString()}</div>
+              {sale.product_name && (
+                <div className="text-sm text-gray-500 dark:text-gray-400">Product: {sale.product_name}</div>
+              )}
+              {sale.customer && (
+                <div className="text-sm text-gray-500 dark:text-gray-400">Customer: {sale.customer}</div>
+              )}
+              {sale.notes && <div className="text-sm text-gray-500 dark:text-gray-400">{sale.notes}</div>}
+              <div className="mt-1">
+                <span className="text-xs text-gray-400">{sale.date}</span>
+              </div>
+            </div>
+            <div className="flex gap-1 shrink-0 ml-4">
+              <button onClick={() => onEdit(sale.id)} className="text-xs px-2 py-1 text-gray-500 hover:text-foreground">Edit</button>
+              <button onClick={() => onDelete(sale.id)} className="text-xs px-2 py-1 text-red-500 hover:text-red-700">Delete</button>
+            </div>
+          </div>
+        )
+      )}
+    </div>
+  );
+}
+
+/* ================================================================
+   ACCOUNTING — Products
+   ================================================================ */
+
+function ProductForm({ onDone, onCancel }: { onDone: () => void; onCancel: () => void }) {
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [materials, setMaterials] = useState("");
+  const [currency, setCurrency] = useState("ARS");
+  const [status, setStatus] = useState<Product["status"]>("in_progress");
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    await fetch("/api/products", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, description, materials, currency, status }),
+    });
+    onDone();
+  }
+
+  return (
+    <form onSubmit={submit} className="mb-6 p-4 border border-gray-200 dark:border-gray-700 rounded-lg space-y-3">
+      <input className={inputClass} placeholder="Product name" value={name} onChange={(e) => setName(e.target.value)} required />
+      <textarea className={inputClass} placeholder="Description (optional)" value={description} onChange={(e) => setDescription(e.target.value)} rows={2} />
+      <textarea className={inputClass} placeholder="Materials used (optional)" value={materials} onChange={(e) => setMaterials(e.target.value)} rows={2} />
+      <div className="flex gap-3">
+        <select className={inputClass + " !w-auto"} value={currency} onChange={(e) => setCurrency(e.target.value)}>
+          <option value="ARS">ARS</option>
+          <option value="USD">USD</option>
+        </select>
+        <select className={inputClass + " !w-auto"} value={status} onChange={(e) => setStatus(e.target.value as Product["status"])}>
+          <option value="in_progress">In Progress</option>
+          <option value="completed">Completed</option>
+          <option value="sold">Sold</option>
+        </select>
+      </div>
+      <div className="flex gap-2">
+        <button type="submit" className={btnPrimary}>Add</button>
+        <button type="button" onClick={onCancel} className={btnSecondary}>Cancel</button>
+      </div>
+    </form>
+  );
+}
+
+function ProductList({
+  items,
+  onOpen,
+  onEdit,
+  onDelete,
+}: {
+  items: Product[];
+  onOpen: (id: number) => void;
+  onEdit: (id: number) => void;
+  onDelete: (id: number) => void;
+}) {
+  const [filterStatus, setFilterStatus] = useState<string>("");
+  const statuses = [...new Set(items.map((p) => p.status))];
+  const filtered = filterStatus ? items.filter((p) => p.status === filterStatus) : items;
+
+  if (items.length === 0) return <EmptyState label="products" />;
+  return (
+    <div className="space-y-3">
+      {statuses.length > 1 && (
+        <div className="flex flex-wrap gap-1.5">
+          <button
+            onClick={() => setFilterStatus("")}
+            className={`text-xs px-2 py-1 rounded-full border transition-colors ${!filterStatus ? "bg-foreground text-background border-foreground" : "border-gray-300 dark:border-gray-600 text-gray-500"}`}
+          >
+            All
+          </button>
+          {statuses.map((s) => (
+            <button
+              key={s}
+              onClick={() => setFilterStatus(filterStatus === s ? "" : s)}
+              className={`text-xs px-2 py-1 rounded-full border transition-colors ${filterStatus === s ? PRODUCT_STATUS_COLORS[s] + " border-current" : "border-gray-300 dark:border-gray-600 text-gray-500"}`}
+            >
+              {formatLabel(s)}
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="space-y-2">
+        {filtered.map((p) => (
+          <div
+            key={p.id}
+            onClick={() => onOpen(p.id)}
+            className="flex items-start justify-between p-4 border border-gray-200 dark:border-gray-700 rounded-lg cursor-pointer hover:border-gray-400 dark:hover:border-gray-500 transition-colors"
+          >
+            <div className="space-y-1">
+              <div className="font-medium">{p.name}</div>
+              {p.description && <div className="text-sm text-gray-500 dark:text-gray-400">{p.description}</div>}
+              <div className="flex flex-wrap gap-2 mt-1">
+                <span className={`text-xs px-2 py-0.5 rounded-full ${PRODUCT_STATUS_COLORS[p.status]}`}>
+                  {formatLabel(p.status)}
+                </span>
+                <span className="text-xs text-gray-400">{p.currency}</span>
+              </div>
+            </div>
+            <div className="flex gap-1 shrink-0 ml-4">
+              <button
+                onClick={(e) => { e.stopPropagation(); onEdit(p.id); }}
+                className="text-xs px-2 py-1 text-gray-500 hover:text-foreground"
+              >
+                Edit
+              </button>
+              <button
+                onClick={(e) => { e.stopPropagation(); onDelete(p.id); }}
+                className="text-xs px-2 py-1 text-red-500 hover:text-red-700"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ================================================================
+   ACCOUNTING — Edit Product Modal
+   ================================================================ */
+
+function EditProductModal({
+  product,
+  onSave,
+  onClose,
+}: {
+  product: Product;
+  onSave: () => void;
+  onClose: () => void;
+}) {
+  const [name, setName] = useState(product.name);
+  const [description, setDescription] = useState(product.description);
+  const [materials, setMaterials] = useState(product.materials);
+  const [currency, setCurrency] = useState(product.currency);
+  const [status, setStatus] = useState(product.status);
+  const [saving, setSaving] = useState(false);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    await fetch("/api/products", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: product.id, name, description, materials, currency, status }),
+    });
+    onSave();
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center" onClick={onClose}>
+      <div className="fixed inset-0 bg-black/40" />
+      <div
+        className="relative w-full sm:max-w-lg bg-background border border-gray-200 dark:border-gray-700 rounded-t-2xl sm:rounded-2xl p-6 space-y-4 max-h-[90vh] overflow-y-auto"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between">
+          <h2 className="font-semibold text-lg">Edit Product</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-foreground text-xl leading-none">&times;</button>
+        </div>
+        <form onSubmit={submit} className="space-y-3">
+          <input className={inputClass} placeholder="Product name" value={name} onChange={(e) => setName(e.target.value)} required disabled={saving} />
+          <textarea className={inputClass} placeholder="Description" value={description} onChange={(e) => setDescription(e.target.value)} rows={2} disabled={saving} />
+          <textarea className={inputClass} placeholder="Materials used" value={materials} onChange={(e) => setMaterials(e.target.value)} rows={2} disabled={saving} />
+          <div className="flex gap-3">
+            <select className={inputClass + " !w-auto"} value={currency} onChange={(e) => setCurrency(e.target.value)} disabled={saving}>
+              <option value="ARS">ARS</option>
+              <option value="USD">USD</option>
+            </select>
+            <select className={inputClass + " !w-auto"} value={status} onChange={(e) => setStatus(e.target.value as Product["status"])} disabled={saving}>
+              <option value="in_progress">In Progress</option>
+              <option value="completed">Completed</option>
+              <option value="sold">Sold</option>
+            </select>
+          </div>
+          <div className="flex gap-2 pt-2">
+            <button type="submit" disabled={saving} className={btnPrimary}>{saving ? "Saving..." : "Save"}</button>
+            <button type="button" onClick={onClose} disabled={saving} className={btnSecondary}>Cancel</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+/* ================================================================
+   ACCOUNTING — Product Detail (work log + images)
+   ================================================================ */
+
+type ProductDetailTab = "work_log" | "images";
+
+function ProductDetail({
+  product,
+  onBack,
+  onEdit,
+}: {
+  product: Product;
+  onBack: () => void;
+  onEdit: () => void;
+}) {
+  const [detailTab, setDetailTab] = useState<ProductDetailTab>("work_log");
+  const [entries, setEntries] = useState<ProductWorkEntry[]>([]);
+  const [images, setImages] = useState<EntryImage[]>([]);
+  const [timeStats, setTimeStats] = useState<ProductTimeStats | null>(null);
+  const [detailLoading, setDetailLoading] = useState(true);
+  const imageInputRef = useRef<HTMLInputElement>(null);
+
+  const fetchEntries = useCallback(() => {
+    return fetch(`/api/products/entries?productId=${product.id}`)
+      .then((r) => r.json())
+      .then(setEntries);
+  }, [product.id]);
+
+  const fetchImages = useCallback(() => {
+    return fetch(`/api/products/images?productId=${product.id}`)
+      .then((r) => r.json())
+      .then(setImages);
+  }, [product.id]);
+
+  const fetchStats = useCallback(() => {
+    return fetch(`/api/products/stats?productId=${product.id}`)
+      .then((r) => r.json())
+      .then(setTimeStats);
+  }, [product.id]);
+
+  useEffect(() => {
+    Promise.all([fetchEntries(), fetchImages(), fetchStats()]).then(() => setDetailLoading(false));
+  }, [fetchEntries, fetchImages, fetchStats]);
+
+  const { confirm: confirmDetail, dialog: confirmDetailDialog } = useConfirm();
+
+  async function deleteEntry(entryId: number) {
+    if (!await confirmDetail("Delete this work entry?")) return;
+    await fetch(`/api/products/entries?id=${entryId}`, { method: "DELETE" });
+    fetchEntries();
+    fetchStats();
+  }
+
+  async function uploadImage(file: File) {
+    const formData = new FormData();
+    formData.append("productId", String(product.id));
+    formData.append("file", file);
+    await fetch("/api/products/images", { method: "POST", body: formData });
+    fetchImages();
+  }
+
+  async function deleteImage(imageId: number) {
+    if (!await confirmDetail("Delete this image?")) return;
+    await fetch(`/api/products/images?id=${imageId}`, { method: "DELETE" });
+    fetchImages();
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <button onClick={onBack} className="text-sm text-gray-500 hover:text-foreground">
+          &larr; Back
+        </button>
+        <button onClick={onEdit} className="text-xs px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded-md text-gray-500 hover:text-foreground hover:border-gray-400">
+          Edit
+        </button>
+      </div>
+
+      <div>
+        <h2 className="text-xl font-bold">{product.name}</h2>
+        {product.description && (
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{product.description}</p>
+        )}
+        {product.materials && (
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Materials: {product.materials}</p>
+        )}
+        <div className="flex flex-wrap gap-2 mt-2">
+          <span className={`text-xs px-2 py-0.5 rounded-full ${PRODUCT_STATUS_COLORS[product.status]}`}>
+            {formatLabel(product.status)}
+          </span>
+          <span className="text-xs text-gray-400">{product.currency}</span>
+        </div>
+        {/* Stats bar */}
+        {!detailLoading && timeStats && (
+          <div className="flex flex-wrap gap-4 mt-3 text-xs text-gray-500 dark:text-gray-400">
+            {timeStats.total_minutes > 0 && (
+              <span>{Math.round(timeStats.total_minutes / 60 * 10) / 10}h logged</span>
+            )}
+            {timeStats.total_entry_count > 0 && (
+              <span>{timeStats.total_entry_count} entries{timeStats.tracked_entry_count > 0 && timeStats.tracked_entry_count < timeStats.total_entry_count ? ` (${timeStats.tracked_entry_count} tracked)` : ""}</span>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Detail tabs */}
+      <div className="flex gap-1 border-b border-gray-200 dark:border-gray-800">
+        {(["work_log", "images"] as ProductDetailTab[]).map((t) => (
+          <button
+            key={t}
+            onClick={() => setDetailTab(t)}
+            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+              detailTab === t
+                ? "border-foreground text-foreground"
+                : "border-transparent text-gray-500 hover:text-foreground"
+            }`}
+          >
+            {formatLabel(t)}
+          </button>
+        ))}
+      </div>
+
+      {detailLoading ? <Spinner /> : <>
+      {/* WORK LOG TAB */}
+      {detailTab === "work_log" && (
+        <div className="space-y-4">
+          <NewProductEntryForm productId={product.id} onCreated={() => { fetchEntries(); fetchStats(); }} />
+          {entries.length === 0 && (
+            <p className="text-sm text-gray-400 text-center py-6">No work entries yet. Add your first one above.</p>
+          )}
+          <div className="space-y-4">
+            {entries.map((entry) => (
+              <ProductWorkEntryCard key={entry.id} entry={entry} onDelete={() => deleteEntry(entry.id)} onUpdated={() => { fetchEntries(); fetchStats(); }} />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* IMAGES TAB */}
+      {detailTab === "images" && (
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            {images.map((img) => (
+              <div key={img.id} className="relative group">
+                <img
+                  src={img.url}
+                  alt={img.original_name}
+                  className="w-full h-40 object-cover rounded-lg border border-gray-200 dark:border-gray-700"
+                />
+                <button
+                  onClick={() => deleteImage(img.id)}
+                  className="absolute top-2 right-2 w-6 h-6 bg-red-500 text-white rounded-full text-xs opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"
+                >
+                  X
+                </button>
+                <p className="text-xs text-gray-400 mt-1 truncate">{img.original_name}</p>
+              </div>
+            ))}
+          </div>
+          {images.length === 0 && (
+            <p className="text-sm text-gray-400 text-center py-6">No images yet.</p>
+          )}
+          <input
+            ref={imageInputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) {
+                uploadImage(file);
+                e.target.value = "";
+              }
+            }}
+          />
+          <button
+            type="button"
+            onClick={() => imageInputRef.current?.click()}
+            className={btnSecondary}
+          >
+            Upload Image
+          </button>
+        </div>
+      )}
+      </>}
+      {confirmDetailDialog()}
+    </div>
+  );
+}
+
+/* ---- New Product Entry Form ---- */
+
+function NewProductEntryForm({
+  productId,
+  onCreated,
+}: {
+  productId: number;
+  onCreated: () => void;
+}) {
+  const [text, setText] = useState("");
+  const [minutesSpent, setMinutesSpent] = useState("");
+  const [files, setFiles] = useState<File[]>([]);
+  const [submitting, setSubmitting] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!text.trim() && files.length === 0) return;
+    setSubmitting(true);
+    const formData = new FormData();
+    formData.append("productId", String(productId));
+    formData.append("text", text);
+    if (minutesSpent) formData.append("minutesSpent", minutesSpent);
+    for (const file of files) {
+      formData.append("files", file);
+    }
+    await fetch("/api/products/entries", { method: "POST", body: formData });
+    setText("");
+    setMinutesSpent("");
+    setFiles([]);
+    setSubmitting(false);
+    onCreated();
+  }
+
+  function removeFile(index: number) {
+    setFiles((prev) => prev.filter((_, i) => i !== index));
+  }
+
+  return (
+    <form onSubmit={submit} className="p-4 border border-gray-200 dark:border-gray-700 rounded-lg space-y-3">
+      <textarea
+        className={inputClass}
+        placeholder="What did you work on?"
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        rows={3}
+      />
+      <input
+        className={inputClass + " !w-32"}
+        type="number"
+        min="0"
+        placeholder="Minutes spent"
+        value={minutesSpent}
+        onChange={(e) => setMinutesSpent(e.target.value)}
+      />
+      {files.length > 0 && (
+        <div className="flex gap-2 flex-wrap">
+          {files.map((file, i) => (
+            <div key={i} className="relative">
+              <img
+                src={URL.createObjectURL(file)}
+                alt={file.name}
+                className="w-20 h-20 object-cover rounded border border-gray-300 dark:border-gray-600"
+              />
+              <button
+                type="button"
+                onClick={() => removeFile(i)}
+                className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-red-500 text-white rounded-full text-xs flex items-center justify-center"
+              >
+                X
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="flex gap-2 items-center">
+        <button type="submit" disabled={submitting} className={btnPrimary}>
+          {submitting ? "Saving..." : "Add Entry"}
+        </button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          multiple
+          className="hidden"
+          onChange={(e) => {
+            if (e.target.files) {
+              setFiles((prev) => [...prev, ...Array.from(e.target.files!)]);
+              e.target.value = "";
+            }
+          }}
+        />
+        <button type="button" onClick={() => fileInputRef.current?.click()} className={btnSecondary}>
+          Attach Images
+        </button>
+      </div>
+    </form>
+  );
+}
+
+/* ---- Product Work Entry Card ---- */
+
+function ProductWorkEntryCard({ entry, onDelete, onUpdated }: { entry: ProductWorkEntry; onDelete: () => void; onUpdated: () => void }) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+  const [editingText, setEditingText] = useState(false);
+  const [text, setText] = useState(entry.text);
+  const [savingText, setSavingText] = useState(false);
+  const { confirm: confirmImg, dialog: confirmImgDialog } = useConfirm();
+
+  const date = new Date(entry.created_at + "Z");
+  const dateStr = date.toLocaleDateString("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+
+  async function attachImages(files: FileList) {
+    setUploading(true);
+    const formData = new FormData();
+    formData.append("entryId", String(entry.id));
+    for (const file of Array.from(files)) {
+      formData.append("files", file);
+    }
+    await fetch("/api/products/entries/images", { method: "POST", body: formData });
+    setUploading(false);
+    onUpdated();
+  }
+
+  async function removeImage(imageId: number) {
+    if (!await confirmImg("Delete this image?")) return;
+    await fetch(`/api/products/entries/images?id=${imageId}`, { method: "DELETE" });
+    onUpdated();
+  }
+
+  async function saveText() {
+    setSavingText(true);
+    await fetch("/api/products/entries/text", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: entry.id, text }),
+    });
+    setSavingText(false);
+    setEditingText(false);
+    onUpdated();
+  }
+
+  return (
+    <div className="p-4 border border-gray-200 dark:border-gray-700 rounded-lg space-y-3">
+      <div className="flex items-start justify-between">
+        <div className="flex items-center gap-3">
+          <time className="text-xs text-gray-400">{dateStr}</time>
+          {entry.minutes_spent != null && entry.minutes_spent > 0 && (
+            <span className="text-xs text-gray-400">{entry.minutes_spent}min</span>
+          )}
+        </div>
+        <div className="flex gap-2">
+          <button onClick={() => setEditingText(!editingText)} className="text-xs text-gray-500 hover:text-foreground">
+            {editingText ? "Cancel" : "Edit"}
+          </button>
+          <button onClick={onDelete} className="text-xs text-red-500 hover:text-red-700">
+            Delete
+          </button>
+        </div>
+      </div>
+
+      {editingText ? (
+        <div className="space-y-2">
+          <textarea
+            className={inputClass}
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            rows={3}
+            disabled={savingText}
+          />
+          <button onClick={saveText} disabled={savingText} className={btnPrimary + " text-xs !px-3 !py-1.5"}>
+            {savingText ? "Saving..." : "Save"}
+          </button>
+        </div>
+      ) : (
+        entry.text && <p className="text-sm whitespace-pre-wrap">{entry.text}</p>
+      )}
+
+      {entry.images.length > 0 && (
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+          {entry.images.map((img) => (
+            <div key={img.id} className="relative group">
+              <img
+                src={img.url}
+                alt={img.original_name}
+                className="w-full h-40 object-cover rounded-lg border border-gray-200 dark:border-gray-700"
+              />
+              <button
+                onClick={() => removeImage(img.id)}
+                className="absolute top-2 right-2 w-6 h-6 bg-red-500 text-white rounded-full text-xs opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"
+              >
+                X
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          multiple
+          className="hidden"
+          onChange={(e) => {
+            if (e.target.files && e.target.files.length > 0) {
+              attachImages(e.target.files);
+              e.target.value = "";
+            }
+          }}
+        />
+        <button
+          type="button"
+          disabled={uploading}
+          onClick={() => fileInputRef.current?.click()}
+          className="text-xs px-2 py-1 text-gray-500 hover:text-foreground border border-gray-300 dark:border-gray-600 rounded"
+        >
+          {uploading ? "Uploading..." : "Attach Images"}
+        </button>
+      </div>
+      {confirmImgDialog()}
     </div>
   );
 }

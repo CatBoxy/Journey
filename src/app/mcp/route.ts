@@ -465,6 +465,267 @@ function createServer() {
     };
   });
 
+  // ---- Products (Accounting) ----
+
+  server.registerTool("list_products", {
+    description: "List all products/creations. Optionally filter by status (in_progress, completed, sold).",
+    inputSchema: {
+      status: z.enum(["in_progress", "completed", "sold"]).optional().describe("Filter by status"),
+    },
+  }, async ({ status }) => {
+    let sql = "SELECT * FROM products";
+    const args: unknown[] = [];
+    if (status) { sql += " WHERE status = ?"; args.push(status); }
+    sql += " ORDER BY created_at DESC";
+    const result = await execute(sql, args);
+    return { content: [{ type: "text", text: JSON.stringify(result.rows, null, 2) }] };
+  });
+
+  server.registerTool("add_product", {
+    description: "Add a new product/creation to the catalog",
+    inputSchema: {
+      name: z.string().describe("Product name"),
+      description: z.string().optional().describe("Description"),
+      materials: z.string().optional().describe("Free-form list of materials used"),
+      currency: z.enum(["ARS", "USD"]).optional().describe("Currency for costs"),
+      status: z.enum(["in_progress", "completed", "sold"]).optional().describe("Product status"),
+    },
+  }, async ({ name, description, materials, currency, status }) => {
+    const result = await execute(
+      "INSERT INTO products (name, description, materials, currency, status) VALUES (?, ?, ?, ?, ?)",
+      [name, description || "", materials || "", currency || "ARS", status || "in_progress"]
+    );
+    const row = await execute("SELECT * FROM products WHERE id = ?", [result.lastInsertRowid!]);
+    return { content: [{ type: "text", text: `Created: ${JSON.stringify(row.rows[0], null, 2)}` }] };
+  });
+
+  server.registerTool("update_product", {
+    description: "Update an existing product. Only fields you include will be changed.",
+    inputSchema: {
+      id: z.number().describe("Product ID"),
+      name: z.string().optional().describe("Product name"),
+      description: z.string().optional().describe("Description"),
+      materials: z.string().optional().describe("Free-form list of materials used"),
+      currency: z.enum(["ARS", "USD"]).optional(),
+      status: z.enum(["in_progress", "completed", "sold"]).optional(),
+    },
+  }, async ({ id, name, description, materials, currency, status }) => {
+    const update = buildPartialUpdate("products", id, { name, description, materials, currency, status });
+    if (update) await execute(update.sql, update.args);
+    const row = await execute("SELECT * FROM products WHERE id = ?", [id]);
+    return { content: [{ type: "text", text: `Updated: ${JSON.stringify(row.rows[0], null, 2)}` }] };
+  });
+
+  server.registerTool("add_product_work_entry", {
+    description: "Add a work session entry to a product. Log what you did and how long it took.",
+    inputSchema: {
+      productId: z.number().describe("Product ID"),
+      text: z.string().describe("What you worked on"),
+      minutesSpent: z.number().optional().describe("Minutes spent on this session"),
+    },
+  }, async ({ productId, text, minutesSpent }) => {
+    const result = await execute(
+      "INSERT INTO product_work_entries (product_id, text, minutes_spent) VALUES (?, ?, ?)",
+      [productId, text, minutesSpent ?? null]
+    );
+    return { content: [{ type: "text", text: `Created work entry #${result.lastInsertRowid}` }] };
+  });
+
+  server.registerTool("list_product_work_entries", {
+    description: "List all work session entries for a product",
+    inputSchema: {
+      productId: z.number().describe("Product ID"),
+    },
+  }, async ({ productId }) => {
+    const entries = await execute(
+      "SELECT * FROM product_work_entries WHERE product_id = ? ORDER BY created_at DESC",
+      [productId]
+    );
+    return { content: [{ type: "text", text: JSON.stringify(entries.rows, null, 2) }] };
+  });
+
+  server.registerTool("get_product_time_stats", {
+    description: "Get time tracking stats for a product. Returns total_minutes, entry counts, and date range.",
+    inputSchema: {
+      productId: z.number().describe("Product ID"),
+    },
+  }, async ({ productId }) => {
+    const result = await execute(
+      `SELECT
+         COALESCE(SUM(minutes_spent), 0) as total_minutes,
+         COUNT(*) as total_entry_count,
+         COUNT(minutes_spent) as tracked_entry_count,
+         MIN(created_at) as first_entry,
+         MAX(created_at) as last_entry
+       FROM product_work_entries WHERE product_id = ?`,
+      [productId]
+    );
+    return { content: [{ type: "text", text: JSON.stringify(result.rows[0], null, 2) }] };
+  });
+
+  // ---- Expenses (Accounting) ----
+
+  server.registerTool("list_expenses", {
+    description: "List all expenses. Optionally filter by category (materials, tools, courses, shipping, packaging, other).",
+    inputSchema: {
+      category: z.string().optional().describe("Filter by category"),
+    },
+  }, async ({ category }) => {
+    let sql = "SELECT * FROM expenses";
+    const args: unknown[] = [];
+    if (category) { sql += " WHERE category = ?"; args.push(category); }
+    sql += " ORDER BY date DESC";
+    const result = await execute(sql, args);
+    return { content: [{ type: "text", text: JSON.stringify(result.rows, null, 2) }] };
+  });
+
+  server.registerTool("add_expense", {
+    description: "Add a new expense. Categories: materials, tools, courses, shipping, packaging, other.",
+    inputSchema: {
+      description: z.string().describe("Expense description"),
+      amount: z.number().describe("Amount"),
+      currency: z.enum(["ARS", "USD"]).optional().describe("Currency (default ARS)"),
+      category: z.enum(["materials", "tools", "courses", "shipping", "packaging", "other"]).optional().describe("Expense category"),
+      date: z.string().optional().describe("Date (YYYY-MM-DD, default today)"),
+      notes: z.string().optional().describe("Additional notes"),
+    },
+  }, async ({ description, amount, currency, category, date, notes }) => {
+    const result = await execute(
+      "INSERT INTO expenses (description, amount, currency, category, date, notes) VALUES (?, ?, ?, ?, ?, ?)",
+      [description, amount, currency || "ARS", category || "other", date || new Date().toISOString().split("T")[0], notes || ""]
+    );
+    const row = await execute("SELECT * FROM expenses WHERE id = ?", [result.lastInsertRowid!]);
+    return { content: [{ type: "text", text: `Created: ${JSON.stringify(row.rows[0], null, 2)}` }] };
+  });
+
+  server.registerTool("update_expense", {
+    description: "Update an existing expense. Only fields you include will be changed.",
+    inputSchema: {
+      id: z.number().describe("Expense ID"),
+      description: z.string().optional(),
+      amount: z.number().optional(),
+      currency: z.enum(["ARS", "USD"]).optional(),
+      category: z.enum(["materials", "tools", "courses", "shipping", "packaging", "other"]).optional(),
+      date: z.string().optional().describe("Date (YYYY-MM-DD)"),
+      notes: z.string().optional(),
+    },
+  }, async ({ id, description, amount, currency, category, date, notes }) => {
+    const update = buildPartialUpdate("expenses", id, { description, amount, currency, category, date, notes });
+    if (update) await execute(update.sql, update.args);
+    const row = await execute("SELECT * FROM expenses WHERE id = ?", [id]);
+    return { content: [{ type: "text", text: `Updated: ${JSON.stringify(row.rows[0], null, 2)}` }] };
+  });
+
+  server.registerTool("delete_expense", {
+    description: "Delete an expense by ID",
+    inputSchema: {
+      id: z.number().describe("Expense ID"),
+    },
+  }, async ({ id }) => {
+    await execute("DELETE FROM expenses WHERE id = ?", [id]);
+    return { content: [{ type: "text", text: `Deleted expense #${id}` }] };
+  });
+
+  // ---- Sales (Accounting) ----
+
+  server.registerTool("list_sales", {
+    description: "List all sales with linked product names",
+    inputSchema: {},
+  }, async () => {
+    const result = await execute(
+      `SELECT s.*, p.name as product_name
+       FROM sales s LEFT JOIN products p ON s.product_id = p.id
+       ORDER BY s.date DESC`
+    );
+    return { content: [{ type: "text", text: JSON.stringify(result.rows, null, 2) }] };
+  });
+
+  server.registerTool("add_sale", {
+    description: "Record a new sale",
+    inputSchema: {
+      description: z.string().describe("Sale description"),
+      amount: z.number().describe("Amount received"),
+      currency: z.enum(["ARS", "USD"]).optional().describe("Currency (default ARS)"),
+      product_id: z.number().optional().describe("ID of the product sold (optional)"),
+      customer: z.string().optional().describe("Customer name"),
+      date: z.string().optional().describe("Date (YYYY-MM-DD, default today)"),
+      notes: z.string().optional().describe("Additional notes"),
+    },
+  }, async ({ description, amount, currency, product_id, customer, date, notes }) => {
+    const result = await execute(
+      "INSERT INTO sales (description, amount, currency, product_id, customer, notes, date) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      [description, amount, currency || "ARS", product_id || null, customer || "", notes || "", date || new Date().toISOString().split("T")[0]]
+    );
+    const row = await execute(
+      `SELECT s.*, p.name as product_name FROM sales s LEFT JOIN products p ON s.product_id = p.id WHERE s.id = ?`,
+      [result.lastInsertRowid!]
+    );
+    return { content: [{ type: "text", text: `Created: ${JSON.stringify(row.rows[0], null, 2)}` }] };
+  });
+
+  server.registerTool("update_sale", {
+    description: "Update an existing sale. Only fields you include will be changed.",
+    inputSchema: {
+      id: z.number().describe("Sale ID"),
+      description: z.string().optional(),
+      amount: z.number().optional(),
+      currency: z.enum(["ARS", "USD"]).optional(),
+      product_id: z.number().optional().describe("ID of the product sold"),
+      customer: z.string().optional(),
+      date: z.string().optional().describe("Date (YYYY-MM-DD)"),
+      notes: z.string().optional(),
+    },
+  }, async ({ id, description, amount, currency, product_id, customer, date, notes }) => {
+    const update = buildPartialUpdate("sales", id, {
+      description, amount, currency,
+      product_id: product_id !== undefined ? (product_id || null) : undefined,
+      customer, date, notes,
+    });
+    if (update) await execute(update.sql, update.args);
+    const row = await execute(
+      `SELECT s.*, p.name as product_name FROM sales s LEFT JOIN products p ON s.product_id = p.id WHERE s.id = ?`,
+      [id]
+    );
+    return { content: [{ type: "text", text: `Updated: ${JSON.stringify(row.rows[0], null, 2)}` }] };
+  });
+
+  // ---- Treasury (Accounting) ----
+
+  server.registerTool("get_treasury", {
+    description: "Get treasury summary: total expenses, total sales, and net balance per currency (ARS/USD). Optionally calculate monthly break-even targets.",
+    inputSchema: {
+      months: z.number().optional().describe("Number of months to calculate break-even targets over"),
+    },
+  }, async ({ months }) => {
+    const expenseResult = await execute(
+      `SELECT
+         COALESCE(SUM(CASE WHEN currency='ARS' THEN amount ELSE 0 END), 0) as ars,
+         COALESCE(SUM(CASE WHEN currency='USD' THEN amount ELSE 0 END), 0) as usd
+       FROM expenses`
+    );
+    const salesResult = await execute(
+      `SELECT
+         COALESCE(SUM(CASE WHEN currency='ARS' THEN amount ELSE 0 END), 0) as ars,
+         COALESCE(SUM(CASE WHEN currency='USD' THEN amount ELSE 0 END), 0) as usd
+       FROM sales`
+    );
+    const expenses = expenseResult.rows[0];
+    const sales = salesResult.rows[0];
+    const net_ars = (sales.ars as number) - (expenses.ars as number);
+    const net_usd = (sales.usd as number) - (expenses.usd as number);
+    const result: Record<string, unknown> = {
+      expenses_ars: expenses.ars, expenses_usd: expenses.usd,
+      sales_ars: sales.ars, sales_usd: sales.usd,
+      net_ars, net_usd,
+    };
+    if (months && months > 0) {
+      result.monthly_target_ars = net_ars < 0 ? Math.abs(net_ars) / months : 0;
+      result.monthly_target_usd = net_usd < 0 ? Math.abs(net_usd) / months : 0;
+      result.months = months;
+    }
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  });
+
   return server;
 }
 

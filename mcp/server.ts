@@ -363,6 +363,272 @@ server.registerTool(
   }
 );
 
+// ---- Products (Accounting) ----
+
+server.registerTool(
+  "list_products",
+  {
+    description: "List all products/creations. Optionally filter by status.",
+    inputSchema: {
+      status: z.enum(["in_progress", "completed", "sold"]).optional().describe("Filter by status"),
+    },
+  },
+  async ({ status }) => {
+    const url = status ? `/api/products?status=${status}` : "/api/products";
+    const data = await api(url);
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  }
+);
+
+server.registerTool(
+  "add_product",
+  {
+    description: "Add a new product/creation to the catalog",
+    inputSchema: {
+      name: z.string().describe("Product name"),
+      description: z.string().optional().describe("Description"),
+      materials: z.string().optional().describe("Free-form list of materials used"),
+      currency: z.enum(["ARS", "USD"]).optional().describe("Currency for costs"),
+      status: z.enum(["in_progress", "completed", "sold"]).optional().describe("Product status"),
+    },
+  },
+  async ({ name, description, materials, currency, status }) => {
+    const data = await api("/api/products", {
+      method: "POST",
+      body: JSON.stringify({ name, description, materials, currency, status }),
+    });
+    return { content: [{ type: "text", text: `Created product: ${JSON.stringify(data, null, 2)}` }] };
+  }
+);
+
+server.registerTool(
+  "update_product",
+  {
+    description: "Update an existing product. Only fields you include will be changed.",
+    inputSchema: {
+      id: z.number().describe("Product ID"),
+      name: z.string().optional().describe("Product name"),
+      description: z.string().optional().describe("Description"),
+      materials: z.string().optional().describe("Free-form list of materials used"),
+      currency: z.enum(["ARS", "USD"]).optional(),
+      status: z.enum(["in_progress", "completed", "sold"]).optional(),
+    },
+  },
+  async ({ id, name, description, materials, currency, status }) => {
+    const data = await api("/api/products", {
+      method: "PUT",
+      body: JSON.stringify({ id, name, description, materials, currency, status }),
+    });
+    return { content: [{ type: "text", text: `Updated: ${JSON.stringify(data, null, 2)}` }] };
+  }
+);
+
+server.registerTool(
+  "add_product_work_entry",
+  {
+    description: "Add a work session entry to a product",
+    inputSchema: {
+      productId: z.number().describe("Product ID"),
+      text: z.string().describe("What you worked on"),
+      minutesSpent: z.number().optional().describe("Minutes spent on this session"),
+    },
+  },
+  async ({ productId, text, minutesSpent }) => {
+    const formData = new FormData();
+    formData.append("productId", String(productId));
+    formData.append("text", text);
+    if (minutesSpent !== undefined) formData.append("minutesSpent", String(minutesSpent));
+    const res = await fetch(`${BASE_URL}/api/products/entries`, {
+      method: "POST",
+      body: formData,
+    });
+    const data = await res.json();
+    return { content: [{ type: "text", text: `Created work entry: ${JSON.stringify(data)}` }] };
+  }
+);
+
+server.registerTool(
+  "list_product_work_entries",
+  {
+    description: "List all work session entries for a product",
+    inputSchema: {
+      productId: z.number().describe("Product ID"),
+    },
+  },
+  async ({ productId }) => {
+    const data = await api(`/api/products/entries?productId=${productId}`);
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  }
+);
+
+server.registerTool(
+  "get_product_time_stats",
+  {
+    description: "Get time tracking stats for a product",
+    inputSchema: {
+      productId: z.number().describe("Product ID"),
+    },
+  },
+  async ({ productId }) => {
+    const data = await api(`/api/products/stats?productId=${productId}`);
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  }
+);
+
+// ---- Expenses (Accounting) ----
+
+server.registerTool(
+  "list_expenses",
+  {
+    description: "List all expenses. Optionally filter by category.",
+    inputSchema: {
+      category: z.string().optional().describe("Filter by category"),
+    },
+  },
+  async ({ category }) => {
+    const url = category ? `/api/expenses?category=${category}` : "/api/expenses";
+    const data = await api(url);
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  }
+);
+
+server.registerTool(
+  "add_expense",
+  {
+    description: "Add a new expense. Categories: materials, tools, courses, shipping, packaging, other.",
+    inputSchema: {
+      description: z.string().describe("Expense description"),
+      amount: z.number().describe("Amount"),
+      currency: z.enum(["ARS", "USD"]).optional().describe("Currency (default ARS)"),
+      category: z.enum(["materials", "tools", "courses", "shipping", "packaging", "other"]).optional(),
+      date: z.string().optional().describe("Date (YYYY-MM-DD, default today)"),
+      notes: z.string().optional().describe("Additional notes"),
+    },
+  },
+  async ({ description, amount, currency, category, date, notes }) => {
+    const data = await api("/api/expenses", {
+      method: "POST",
+      body: JSON.stringify({ description, amount, currency, category, date, notes }),
+    });
+    return { content: [{ type: "text", text: `Created expense: ${JSON.stringify(data, null, 2)}` }] };
+  }
+);
+
+server.registerTool(
+  "update_expense",
+  {
+    description: "Update an existing expense. Only fields you include will be changed.",
+    inputSchema: {
+      id: z.number().describe("Expense ID"),
+      description: z.string().optional(),
+      amount: z.number().optional(),
+      currency: z.enum(["ARS", "USD"]).optional(),
+      category: z.enum(["materials", "tools", "courses", "shipping", "packaging", "other"]).optional(),
+      date: z.string().optional().describe("Date (YYYY-MM-DD)"),
+      notes: z.string().optional(),
+    },
+  },
+  async ({ id, description, amount, currency, category, date, notes }) => {
+    const data = await api("/api/expenses", {
+      method: "PUT",
+      body: JSON.stringify({ id, description, amount, currency, category, date, notes }),
+    });
+    return { content: [{ type: "text", text: `Updated: ${JSON.stringify(data, null, 2)}` }] };
+  }
+);
+
+server.registerTool(
+  "delete_expense",
+  {
+    description: "Delete an expense by ID",
+    inputSchema: {
+      id: z.number().describe("Expense ID"),
+    },
+  },
+  async ({ id }) => {
+    await api(`/api/expenses?id=${id}`, { method: "DELETE" });
+    return { content: [{ type: "text", text: `Deleted expense #${id}` }] };
+  }
+);
+
+// ---- Sales (Accounting) ----
+
+server.registerTool(
+  "list_sales",
+  {
+    description: "List all sales with linked product names",
+    inputSchema: {},
+  },
+  async () => {
+    const data = await api("/api/sales");
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  }
+);
+
+server.registerTool(
+  "add_sale",
+  {
+    description: "Record a new sale",
+    inputSchema: {
+      description: z.string().describe("Sale description"),
+      amount: z.number().describe("Amount received"),
+      currency: z.enum(["ARS", "USD"]).optional().describe("Currency (default ARS)"),
+      product_id: z.number().optional().describe("ID of the product sold (optional)"),
+      customer: z.string().optional().describe("Customer name"),
+      date: z.string().optional().describe("Date (YYYY-MM-DD, default today)"),
+      notes: z.string().optional().describe("Additional notes"),
+    },
+  },
+  async ({ description, amount, currency, product_id, customer, date, notes }) => {
+    const data = await api("/api/sales", {
+      method: "POST",
+      body: JSON.stringify({ description, amount, currency, product_id, customer, date, notes }),
+    });
+    return { content: [{ type: "text", text: `Created sale: ${JSON.stringify(data, null, 2)}` }] };
+  }
+);
+
+server.registerTool(
+  "update_sale",
+  {
+    description: "Update an existing sale. Only fields you include will be changed.",
+    inputSchema: {
+      id: z.number().describe("Sale ID"),
+      description: z.string().optional(),
+      amount: z.number().optional(),
+      currency: z.enum(["ARS", "USD"]).optional(),
+      product_id: z.number().optional().describe("ID of the product sold"),
+      customer: z.string().optional(),
+      date: z.string().optional().describe("Date (YYYY-MM-DD)"),
+      notes: z.string().optional(),
+    },
+  },
+  async ({ id, description, amount, currency, product_id, customer, date, notes }) => {
+    const data = await api("/api/sales", {
+      method: "PUT",
+      body: JSON.stringify({ id, description, amount, currency, product_id, customer, date, notes }),
+    });
+    return { content: [{ type: "text", text: `Updated: ${JSON.stringify(data, null, 2)}` }] };
+  }
+);
+
+// ---- Treasury (Accounting) ----
+
+server.registerTool(
+  "get_treasury",
+  {
+    description: "Get treasury summary: total expenses, sales, and net balance per currency. Optionally calculate break-even targets.",
+    inputSchema: {
+      months: z.number().optional().describe("Number of months to calculate break-even targets over"),
+    },
+  },
+  async ({ months }) => {
+    const url = months ? `/api/treasury?months=${months}` : "/api/treasury";
+    const data = await api(url);
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  }
+);
+
 // ---- Start ----
 
 async function main() {
