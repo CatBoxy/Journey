@@ -175,11 +175,22 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-background">
       <header className="border-b border-gray-200 dark:border-gray-800">
-        <div className="max-w-4xl mx-auto px-4 py-6">
-          <h1 className="text-2xl font-bold tracking-tight">Journey</h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-            Techniques, projects, equipment & books
-          </p>
+        <div className="max-w-4xl mx-auto px-4 py-6 flex items-start justify-between">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight">Journey</h1>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+              Techniques, projects, equipment & books
+            </p>
+          </div>
+          <button
+            onClick={async () => {
+              await fetch("/api/auth", { method: "DELETE" });
+              window.location.href = "/login";
+            }}
+            className="text-sm text-gray-400 hover:text-gray-200 transition-colors mt-1"
+          >
+            Log out
+          </button>
         </div>
       </header>
 
