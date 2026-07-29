@@ -13,6 +13,6 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    "/((?!login|api/auth|_next/static|_next/image|favicon.ico|manifest.json|sw.js|apple-touch-icon.png|icons/).*)",
+    "/((?!login|api/auth|mcp|\\.well-known|_next/static|_next/image|favicon.ico|manifest.json|sw.js|apple-touch-icon.png|icons/).*)",
   ],
 };
