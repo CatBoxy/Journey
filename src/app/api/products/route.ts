@@ -17,13 +17,13 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   const body = await request.json();
-  const { name, description, materials, currency, status } = body;
+  const { name, description, materials, currency, status, price } = body;
   if (!name) {
     return Response.json({ error: "Name is required" }, { status: 400 });
   }
   const result = await execute(
-    "INSERT INTO products (name, description, materials, currency, status) VALUES (?, ?, ?, ?, ?)",
-    [name, description || "", materials || "", currency || "ARS", status || "in_progress"]
+    "INSERT INTO products (name, description, materials, currency, status, price) VALUES (?, ?, ?, ?, ?, ?)",
+    [name, description || "", materials || "", currency || "ARS", status || "in_progress", price ?? null]
   );
   const row = await execute("SELECT * FROM products WHERE id = ?", [result.lastInsertRowid!]);
   return Response.json(row.rows[0], { status: 201 });
@@ -35,7 +35,8 @@ export async function PUT(request: NextRequest) {
   if (!id) {
     return Response.json({ error: "ID is required" }, { status: 400 });
   }
-  const update = buildPartialUpdate("products", id, { name, description, materials, currency, status });
+  const { price } = body;
+  const update = buildPartialUpdate("products", id, { name, description, materials, currency, status, price });
   if (update) await execute(update.sql, update.args);
   const row = await execute("SELECT * FROM products WHERE id = ?", [id]);
   return Response.json(row.rows[0]);

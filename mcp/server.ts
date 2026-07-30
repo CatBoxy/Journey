@@ -390,12 +390,13 @@ server.registerTool(
       materials: z.string().optional().describe("Free-form list of materials used"),
       currency: z.enum(["ARS", "USD"]).optional().describe("Currency for costs"),
       status: z.enum(["in_progress", "completed", "sold"]).optional().describe("Product status"),
+      price: z.number().optional().describe("Sale price per unit"),
     },
   },
-  async ({ name, description, materials, currency, status }) => {
+  async ({ name, description, materials, currency, status, price }) => {
     const data = await api("/api/products", {
       method: "POST",
-      body: JSON.stringify({ name, description, materials, currency, status }),
+      body: JSON.stringify({ name, description, materials, currency, status, price }),
     });
     return { content: [{ type: "text", text: `Created product: ${JSON.stringify(data, null, 2)}` }] };
   }
@@ -412,12 +413,13 @@ server.registerTool(
       materials: z.string().optional().describe("Free-form list of materials used"),
       currency: z.enum(["ARS", "USD"]).optional(),
       status: z.enum(["in_progress", "completed", "sold"]).optional(),
+      price: z.number().optional().describe("Sale price per unit"),
     },
   },
-  async ({ id, name, description, materials, currency, status }) => {
+  async ({ id, name, description, materials, currency, status, price }) => {
     const data = await api("/api/products", {
       method: "PUT",
-      body: JSON.stringify({ id, name, description, materials, currency, status }),
+      body: JSON.stringify({ id, name, description, materials, currency, status, price }),
     });
     return { content: [{ type: "text", text: `Updated: ${JSON.stringify(data, null, 2)}` }] };
   }
@@ -495,7 +497,7 @@ server.registerTool(
 server.registerTool(
   "add_expense",
   {
-    description: "Add a new expense. Categories: materials, tools, courses, shipping, packaging, other.",
+    description: "Add a new expense. Categories: materials, tools, courses, shipping, packaging, other. Use recurrence for recurring costs and is_capital for depreciable assets.",
     inputSchema: {
       description: z.string().describe("Expense description"),
       amount: z.number().describe("Amount"),
@@ -503,12 +505,16 @@ server.registerTool(
       category: z.enum(["materials", "tools", "courses", "shipping", "packaging", "other"]).optional(),
       date: z.string().optional().describe("Date (YYYY-MM-DD, default today)"),
       notes: z.string().optional().describe("Additional notes"),
+      recurrence: z.enum(["none", "monthly", "yearly"]).optional().describe("Recurrence type (default none)"),
+      is_capital: z.boolean().optional().describe("Whether this is a capital expense to be depreciated"),
+      useful_life_months: z.number().optional().describe("Useful life in months (required when is_capital is true)"),
+      fx_rate: z.number().optional().describe("ARS per USD exchange rate on the transaction date"),
     },
   },
-  async ({ description, amount, currency, category, date, notes }) => {
+  async ({ description, amount, currency, category, date, notes, recurrence, is_capital, useful_life_months, fx_rate }) => {
     const data = await api("/api/expenses", {
       method: "POST",
-      body: JSON.stringify({ description, amount, currency, category, date, notes }),
+      body: JSON.stringify({ description, amount, currency, category, date, notes, recurrence, is_capital, useful_life_months, fx_rate }),
     });
     return { content: [{ type: "text", text: `Created expense: ${JSON.stringify(data, null, 2)}` }] };
   }
@@ -526,12 +532,16 @@ server.registerTool(
       category: z.enum(["materials", "tools", "courses", "shipping", "packaging", "other"]).optional(),
       date: z.string().optional().describe("Date (YYYY-MM-DD)"),
       notes: z.string().optional(),
+      recurrence: z.enum(["none", "monthly", "yearly"]).optional(),
+      is_capital: z.boolean().optional(),
+      useful_life_months: z.number().optional(),
+      fx_rate: z.number().optional().describe("ARS per USD exchange rate"),
     },
   },
-  async ({ id, description, amount, currency, category, date, notes }) => {
+  async ({ id, description, amount, currency, category, date, notes, recurrence, is_capital, useful_life_months, fx_rate }) => {
     const data = await api("/api/expenses", {
       method: "PUT",
-      body: JSON.stringify({ id, description, amount, currency, category, date, notes }),
+      body: JSON.stringify({ id, description, amount, currency, category, date, notes, recurrence, is_capital, useful_life_months, fx_rate }),
     });
     return { content: [{ type: "text", text: `Updated: ${JSON.stringify(data, null, 2)}` }] };
   }
@@ -577,12 +587,13 @@ server.registerTool(
       customer: z.string().optional().describe("Customer name"),
       date: z.string().optional().describe("Date (YYYY-MM-DD, default today)"),
       notes: z.string().optional().describe("Additional notes"),
+      fx_rate: z.number().optional().describe("ARS per USD exchange rate on the transaction date"),
     },
   },
-  async ({ description, amount, currency, product_id, customer, date, notes }) => {
+  async ({ description, amount, currency, product_id, customer, date, notes, fx_rate }) => {
     const data = await api("/api/sales", {
       method: "POST",
-      body: JSON.stringify({ description, amount, currency, product_id, customer, date, notes }),
+      body: JSON.stringify({ description, amount, currency, product_id, customer, date, notes, fx_rate }),
     });
     return { content: [{ type: "text", text: `Created sale: ${JSON.stringify(data, null, 2)}` }] };
   }
@@ -601,14 +612,176 @@ server.registerTool(
       customer: z.string().optional(),
       date: z.string().optional().describe("Date (YYYY-MM-DD)"),
       notes: z.string().optional(),
+      fx_rate: z.number().optional().describe("ARS per USD exchange rate"),
     },
   },
-  async ({ id, description, amount, currency, product_id, customer, date, notes }) => {
+  async ({ id, description, amount, currency, product_id, customer, date, notes, fx_rate }) => {
     const data = await api("/api/sales", {
       method: "PUT",
-      body: JSON.stringify({ id, description, amount, currency, product_id, customer, date, notes }),
+      body: JSON.stringify({ id, description, amount, currency, product_id, customer, date, notes, fx_rate }),
     });
     return { content: [{ type: "text", text: `Updated: ${JSON.stringify(data, null, 2)}` }] };
+  }
+);
+
+// ---- Materials ----
+
+server.registerTool(
+  "list_materials",
+  {
+    description: "List all materials with current unit costs",
+    inputSchema: {},
+  },
+  async () => {
+    const data = await api("/api/materials");
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  }
+);
+
+server.registerTool(
+  "add_material",
+  {
+    description: "Add a new material for use in product bills of materials",
+    inputSchema: {
+      name: z.string().describe("Material name"),
+      unit: z.enum(["g", "ml", "unit", "cm"]).describe("Unit of measurement"),
+      unit_cost: z.number().describe("Cost per unit"),
+      currency: z.enum(["ARS", "USD"]).optional().describe("Currency (default ARS)"),
+      supplier: z.string().optional().describe("Supplier name"),
+    },
+  },
+  async ({ name, unit, unit_cost, currency, supplier }) => {
+    const data = await api("/api/materials", {
+      method: "POST",
+      body: JSON.stringify({ name, unit, unit_cost, currency, supplier }),
+    });
+    return { content: [{ type: "text", text: `Created material: ${JSON.stringify(data, null, 2)}` }] };
+  }
+);
+
+server.registerTool(
+  "update_material",
+  {
+    description: "Update a material. Price changes are recorded in history automatically.",
+    inputSchema: {
+      id: z.number().describe("Material ID"),
+      name: z.string().optional().describe("Material name"),
+      unit: z.enum(["g", "ml", "unit", "cm"]).optional(),
+      unit_cost: z.number().optional().describe("New cost per unit"),
+      currency: z.enum(["ARS", "USD"]).optional(),
+      supplier: z.string().optional(),
+    },
+  },
+  async ({ id, name, unit, unit_cost, currency, supplier }) => {
+    const data = await api("/api/materials", {
+      method: "PUT",
+      body: JSON.stringify({ id, name, unit, unit_cost, currency, supplier }),
+    });
+    return { content: [{ type: "text", text: `Updated: ${JSON.stringify(data, null, 2)}` }] };
+  }
+);
+
+// ---- Product BOM & Cost ----
+
+server.registerTool(
+  "set_product_bom",
+  {
+    description: "Set the bill of materials for a product. Replaces all existing BOM entries.",
+    inputSchema: {
+      product_id: z.number().describe("Product ID"),
+      items: z.array(z.object({
+        material_id: z.number().describe("Material ID"),
+        quantity: z.number().describe("Quantity of material used per unit"),
+      })).describe("List of materials and quantities"),
+    },
+  },
+  async ({ product_id, items }) => {
+    const data = await api("/api/products/bom", {
+      method: "PUT",
+      body: JSON.stringify({ product_id, items }),
+    });
+    return { content: [{ type: "text", text: `BOM set: ${JSON.stringify(data, null, 2)}` }] };
+  }
+);
+
+server.registerTool(
+  "get_product_cost",
+  {
+    description: "Get detailed cost breakdown for a product: materials, labor, packaging, shipping, fees, margin (cash-only and full-cost views)",
+    inputSchema: {
+      productId: z.number().describe("Product ID"),
+    },
+  },
+  async ({ productId }) => {
+    const data = await api(`/api/products/cost?productId=${productId}`);
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  }
+);
+
+// ---- Settings ----
+
+server.registerTool(
+  "get_settings",
+  {
+    description: "Get all settings (hourly_labor_rate, default_currency, current_fx_rate, transaction_fee_pct, packaging_cost_per_sale, shipping_cost_per_sale)",
+    inputSchema: {},
+  },
+  async () => {
+    const data = await api("/api/settings");
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  }
+);
+
+server.registerTool(
+  "set_setting",
+  {
+    description: "Set a configuration value. Valid keys: default_currency, current_fx_rate, hourly_labor_rate, transaction_fee_pct, packaging_cost_per_sale, shipping_cost_per_sale",
+    inputSchema: {
+      key: z.string().describe("Setting key"),
+      value: z.string().describe("Setting value"),
+    },
+  },
+  async ({ key, value }) => {
+    const data = await api("/api/settings", {
+      method: "PUT",
+      body: JSON.stringify({ key, value }),
+    });
+    return { content: [{ type: "text", text: `Set: ${JSON.stringify(data, null, 2)}` }] };
+  }
+);
+
+// ---- Contributions (Accounting) ----
+
+server.registerTool(
+  "list_contributions",
+  {
+    description: "List all owner capital contributions",
+    inputSchema: {},
+  },
+  async () => {
+    const data = await api("/api/contributions");
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  }
+);
+
+server.registerTool(
+  "add_contribution",
+  {
+    description: "Record an owner capital contribution. Not revenue or expense — money put into the business.",
+    inputSchema: {
+      amount: z.number().describe("Amount contributed"),
+      currency: z.enum(["ARS", "USD"]).optional().describe("Currency (default ARS)"),
+      date: z.string().optional().describe("Date (YYYY-MM-DD, default today)"),
+      description: z.string().optional().describe("Description"),
+      fx_rate: z.number().optional().describe("ARS per USD exchange rate on the transaction date"),
+    },
+  },
+  async ({ amount, currency, date, description, fx_rate }) => {
+    const data = await api("/api/contributions", {
+      method: "POST",
+      body: JSON.stringify({ amount, currency, date, description, fx_rate }),
+    });
+    return { content: [{ type: "text", text: `Created contribution: ${JSON.stringify(data, null, 2)}` }] };
   }
 );
 
@@ -617,7 +790,7 @@ server.registerTool(
 server.registerTool(
   "get_treasury",
   {
-    description: "Get treasury summary: total expenses, sales, and net balance per currency. Optionally calculate break-even targets.",
+    description: "Get treasury summary: expenses, sales, contributions, net balance per currency, FX-normalized totals, cash position, and break-even analysis (ledger method; contribution margin when BOM data exists). Includes fixed monthly costs, average variable costs, and gap to break-even.",
     inputSchema: {
       months: z.number().optional().describe("Number of months to calculate break-even targets over"),
     },
