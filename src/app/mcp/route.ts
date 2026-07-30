@@ -489,11 +489,12 @@ function createServer() {
       materials: z.string().optional().describe("Free-form list of materials used"),
       currency: z.enum(["ARS", "USD"]).optional().describe("Currency for costs"),
       status: z.enum(["in_progress", "completed", "sold"]).optional().describe("Product status"),
+      price: z.number().optional().describe("Sale price per unit"),
     },
-  }, async ({ name, description, materials, currency, status }) => {
+  }, async ({ name, description, materials, currency, status, price }) => {
     const result = await execute(
-      "INSERT INTO products (name, description, materials, currency, status) VALUES (?, ?, ?, ?, ?)",
-      [name, description || "", materials || "", currency || "ARS", status || "in_progress"]
+      "INSERT INTO products (name, description, materials, currency, status, price) VALUES (?, ?, ?, ?, ?, ?)",
+      [name, description || "", materials || "", currency || "ARS", status || "in_progress", price ?? null]
     );
     const row = await execute("SELECT * FROM products WHERE id = ?", [result.lastInsertRowid!]);
     return { content: [{ type: "text", text: `Created: ${JSON.stringify(row.rows[0], null, 2)}` }] };
@@ -508,9 +509,10 @@ function createServer() {
       materials: z.string().optional().describe("Free-form list of materials used"),
       currency: z.enum(["ARS", "USD"]).optional(),
       status: z.enum(["in_progress", "completed", "sold"]).optional(),
+      price: z.number().optional().describe("Sale price per unit"),
     },
-  }, async ({ id, name, description, materials, currency, status }) => {
-    const update = buildPartialUpdate("products", id, { name, description, materials, currency, status });
+  }, async ({ id, name, description, materials, currency, status, price }) => {
+    const update = buildPartialUpdate("products", id, { name, description, materials, currency, status, price });
     if (update) await execute(update.sql, update.args);
     const row = await execute("SELECT * FROM products WHERE id = ?", [id]);
     return { content: [{ type: "text", text: `Updated: ${JSON.stringify(row.rows[0], null, 2)}` }] };
@@ -580,7 +582,7 @@ function createServer() {
   });
 
   server.registerTool("add_expense", {
-    description: "Add a new expense. Categories: materials, tools, courses, shipping, packaging, other.",
+    description: "Add a new expense. Categories: materials, tools, courses, shipping, packaging, other. Use recurrence for recurring costs and is_capital for depreciable assets.",
     inputSchema: {
       description: z.string().describe("Expense description"),
       amount: z.number().describe("Amount"),
@@ -588,11 +590,24 @@ function createServer() {
       category: z.enum(["materials", "tools", "courses", "shipping", "packaging", "other"]).optional().describe("Expense category"),
       date: z.string().optional().describe("Date (YYYY-MM-DD, default today)"),
       notes: z.string().optional().describe("Additional notes"),
+      recurrence: z.enum(["none", "monthly", "yearly"]).optional().describe("Recurrence type (default none)"),
+      is_capital: z.boolean().optional().describe("Whether this is a capital expense to be depreciated"),
+      useful_life_months: z.number().optional().describe("Useful life in months (required when is_capital is true)"),
+      fx_rate: z.number().optional().describe("ARS per USD exchange rate on the transaction date"),
     },
-  }, async ({ description, amount, currency, category, date, notes }) => {
+  }, async ({ description, amount, currency, category, date, notes, recurrence, is_capital, useful_life_months, fx_rate }) => {
+    const rec = recurrence || "none";
+    if (!["none", "monthly", "yearly"].includes(rec)) {
+      return { content: [{ type: "text", text: "Error: recurrence must be none, monthly, or yearly" }], isError: true };
+    }
+    const capital = is_capital ? 1 : 0;
+    if (capital && !useful_life_months) {
+      return { content: [{ type: "text", text: "Error: useful_life_months is required when is_capital is true" }], isError: true };
+    }
     const result = await execute(
-      "INSERT INTO expenses (description, amount, currency, category, date, notes) VALUES (?, ?, ?, ?, ?, ?)",
-      [description, amount, currency || "ARS", category || "other", date || new Date().toISOString().split("T")[0], notes || ""]
+      `INSERT INTO expenses (description, amount, currency, category, date, notes, recurrence, is_capital, useful_life_months, fx_rate)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [description, amount, currency || "ARS", category || "other", date || new Date().toISOString().split("T")[0], notes || "", rec, capital, useful_life_months || null, fx_rate ?? null]
     );
     const row = await execute("SELECT * FROM expenses WHERE id = ?", [result.lastInsertRowid!]);
     return { content: [{ type: "text", text: `Created: ${JSON.stringify(row.rows[0], null, 2)}` }] };
@@ -608,9 +623,17 @@ function createServer() {
       category: z.enum(["materials", "tools", "courses", "shipping", "packaging", "other"]).optional(),
       date: z.string().optional().describe("Date (YYYY-MM-DD)"),
       notes: z.string().optional(),
+      recurrence: z.enum(["none", "monthly", "yearly"]).optional(),
+      is_capital: z.boolean().optional(),
+      useful_life_months: z.number().optional(),
+      fx_rate: z.number().optional().describe("ARS per USD exchange rate"),
     },
-  }, async ({ id, description, amount, currency, category, date, notes }) => {
-    const update = buildPartialUpdate("expenses", id, { description, amount, currency, category, date, notes });
+  }, async ({ id, description, amount, currency, category, date, notes, recurrence, is_capital, useful_life_months, fx_rate }) => {
+    if (recurrence !== undefined && !["none", "monthly", "yearly"].includes(recurrence)) {
+      return { content: [{ type: "text", text: "Error: recurrence must be none, monthly, or yearly" }], isError: true };
+    }
+    const capital = is_capital !== undefined ? (is_capital ? 1 : 0) : undefined;
+    const update = buildPartialUpdate("expenses", id, { description, amount, currency, category, date, notes, recurrence, is_capital: capital, useful_life_months, fx_rate });
     if (update) await execute(update.sql, update.args);
     const row = await execute("SELECT * FROM expenses WHERE id = ?", [id]);
     return { content: [{ type: "text", text: `Updated: ${JSON.stringify(row.rows[0], null, 2)}` }] };
@@ -641,7 +664,7 @@ function createServer() {
   });
 
   server.registerTool("add_sale", {
-    description: "Record a new sale",
+    description: "Record a new sale. If product_id is provided and the product has a BOM, unit_cost_at_sale is auto-calculated.",
     inputSchema: {
       description: z.string().describe("Sale description"),
       amount: z.number().describe("Amount received"),
@@ -650,11 +673,32 @@ function createServer() {
       customer: z.string().optional().describe("Customer name"),
       date: z.string().optional().describe("Date (YYYY-MM-DD, default today)"),
       notes: z.string().optional().describe("Additional notes"),
+      fx_rate: z.number().optional().describe("ARS per USD exchange rate on the transaction date"),
     },
-  }, async ({ description, amount, currency, product_id, customer, date, notes }) => {
+  }, async ({ description, amount, currency, product_id, customer, date, notes, fx_rate }) => {
+    // Auto-populate unit_cost_at_sale from BOM
+    let unitCostAtSale: number | null = null;
+    if (product_id) {
+      const bomResult = await execute(
+        `SELECT SUM(pm.quantity * m.unit_cost) as material_cost
+         FROM product_materials pm JOIN materials m ON m.id = pm.material_id
+         WHERE pm.product_id = ?`,
+        [product_id]
+      );
+      const materialCost = (bomResult.rows[0]?.material_cost as number) || 0;
+      if (materialCost > 0) {
+        const settingsResult = await execute("SELECT key, value FROM settings");
+        const s: Record<string, string> = {};
+        for (const row of settingsResult.rows) s[row.key as string] = row.value as string;
+        const packagingCost = s.packaging_cost_per_sale ? Number(s.packaging_cost_per_sale) : 0;
+        const shippingCost = s.shipping_cost_per_sale ? Number(s.shipping_cost_per_sale) : 0;
+        const txFeePct = s.transaction_fee_pct ? Number(s.transaction_fee_pct) / 100 : 0;
+        unitCostAtSale = materialCost + packagingCost + shippingCost + (txFeePct * amount);
+      }
+    }
     const result = await execute(
-      "INSERT INTO sales (description, amount, currency, product_id, customer, notes, date) VALUES (?, ?, ?, ?, ?, ?, ?)",
-      [description, amount, currency || "ARS", product_id || null, customer || "", notes || "", date || new Date().toISOString().split("T")[0]]
+      "INSERT INTO sales (description, amount, currency, product_id, customer, notes, date, fx_rate, unit_cost_at_sale) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      [description, amount, currency || "ARS", product_id || null, customer || "", notes || "", date || new Date().toISOString().split("T")[0], fx_rate ?? null, unitCostAtSale]
     );
     const row = await execute(
       `SELECT s.*, p.name as product_name FROM sales s LEFT JOIN products p ON s.product_id = p.id WHERE s.id = ?`,
@@ -674,12 +718,13 @@ function createServer() {
       customer: z.string().optional(),
       date: z.string().optional().describe("Date (YYYY-MM-DD)"),
       notes: z.string().optional(),
+      fx_rate: z.number().optional().describe("ARS per USD exchange rate"),
     },
-  }, async ({ id, description, amount, currency, product_id, customer, date, notes }) => {
+  }, async ({ id, description, amount, currency, product_id, customer, date, notes, fx_rate }) => {
     const update = buildPartialUpdate("sales", id, {
       description, amount, currency,
       product_id: product_id !== undefined ? (product_id || null) : undefined,
-      customer, date, notes,
+      customer, date, notes, fx_rate,
     });
     if (update) await execute(update.sql, update.args);
     const row = await execute(
@@ -689,40 +734,264 @@ function createServer() {
     return { content: [{ type: "text", text: `Updated: ${JSON.stringify(row.rows[0], null, 2)}` }] };
   });
 
+  // ---- Materials ----
+
+  server.registerTool("list_materials", {
+    description: "List all materials with current unit costs",
+    inputSchema: {},
+  }, async () => {
+    const result = await execute("SELECT * FROM materials ORDER BY name");
+    return { content: [{ type: "text", text: JSON.stringify(result.rows, null, 2) }] };
+  });
+
+  server.registerTool("add_material", {
+    description: "Add a new material for use in product bills of materials",
+    inputSchema: {
+      name: z.string().describe("Material name"),
+      unit: z.enum(["g", "ml", "unit", "cm"]).describe("Unit of measurement"),
+      unit_cost: z.number().describe("Cost per unit"),
+      currency: z.enum(["ARS", "USD"]).optional().describe("Currency (default ARS)"),
+      supplier: z.string().optional().describe("Supplier name"),
+    },
+  }, async ({ name, unit, unit_cost, currency, supplier }) => {
+    const result = await execute(
+      "INSERT INTO materials (name, unit, unit_cost, currency, supplier) VALUES (?, ?, ?, ?, ?)",
+      [name, unit, unit_cost, currency || "ARS", supplier || ""]
+    );
+    await execute(
+      "INSERT INTO material_price_history (material_id, unit_cost, currency) VALUES (?, ?, ?)",
+      [result.lastInsertRowid!, unit_cost, currency || "ARS"]
+    );
+    const row = await execute("SELECT * FROM materials WHERE id = ?", [result.lastInsertRowid!]);
+    return { content: [{ type: "text", text: `Created: ${JSON.stringify(row.rows[0], null, 2)}` }] };
+  });
+
+  server.registerTool("update_material", {
+    description: "Update a material. Price changes are recorded in history automatically.",
+    inputSchema: {
+      id: z.number().describe("Material ID"),
+      name: z.string().optional().describe("Material name"),
+      unit: z.enum(["g", "ml", "unit", "cm"]).optional(),
+      unit_cost: z.number().optional().describe("New cost per unit"),
+      currency: z.enum(["ARS", "USD"]).optional(),
+      supplier: z.string().optional(),
+    },
+  }, async ({ id, name, unit, unit_cost, currency, supplier }) => {
+    const update = buildPartialUpdate("materials", id, {
+      name, unit, unit_cost, currency, supplier,
+      updated_at: new Date().toISOString().replace("T", " ").substring(0, 19),
+    });
+    if (update) await execute(update.sql, update.args);
+    if (unit_cost !== undefined) {
+      const current = await execute("SELECT currency FROM materials WHERE id = ?", [id]);
+      const cur = currency || (current.rows[0]?.currency as string) || "ARS";
+      await execute(
+        "INSERT INTO material_price_history (material_id, unit_cost, currency) VALUES (?, ?, ?)",
+        [id, unit_cost, cur]
+      );
+    }
+    const row = await execute("SELECT * FROM materials WHERE id = ?", [id]);
+    return { content: [{ type: "text", text: `Updated: ${JSON.stringify(row.rows[0], null, 2)}` }] };
+  });
+
+  // ---- Product BOM & Cost ----
+
+  server.registerTool("set_product_bom", {
+    description: "Set the bill of materials for a product. Replaces all existing BOM entries.",
+    inputSchema: {
+      product_id: z.number().describe("Product ID"),
+      items: z.array(z.object({
+        material_id: z.number().describe("Material ID"),
+        quantity: z.number().describe("Quantity of material used per unit"),
+      })).describe("List of materials and quantities"),
+    },
+  }, async ({ product_id, items }) => {
+    await execute("DELETE FROM product_materials WHERE product_id = ?", [product_id]);
+    for (const item of items) {
+      if (!item.material_id || item.quantity == null) continue;
+      await execute(
+        "INSERT INTO product_materials (product_id, material_id, quantity) VALUES (?, ?, ?)",
+        [product_id, item.material_id, item.quantity]
+      );
+    }
+    const result = await execute(
+      `SELECT pm.material_id, pm.quantity, m.name, m.unit, m.unit_cost, m.currency
+       FROM product_materials pm JOIN materials m ON m.id = pm.material_id
+       WHERE pm.product_id = ?`,
+      [product_id]
+    );
+    return { content: [{ type: "text", text: `BOM set: ${JSON.stringify(result.rows, null, 2)}` }] };
+  });
+
+  server.registerTool("get_product_cost", {
+    description: "Get detailed cost breakdown for a product: materials, labor, packaging, shipping, fees, margin (cash-only and full-cost views)",
+    inputSchema: {
+      productId: z.number().describe("Product ID"),
+    },
+  }, async ({ productId }) => {
+    const productResult = await execute("SELECT * FROM products WHERE id = ?", [productId]);
+    if (productResult.rows.length === 0) {
+      return { content: [{ type: "text", text: "Error: Product not found" }], isError: true };
+    }
+    const product = productResult.rows[0];
+    const bomResult = await execute(
+      `SELECT SUM(pm.quantity * m.unit_cost) as material_cost
+       FROM product_materials pm JOIN materials m ON m.id = pm.material_id
+       WHERE pm.product_id = ?`,
+      [productId]
+    );
+    const materialCost = (bomResult.rows[0]?.material_cost as number) || 0;
+    const timeResult = await execute(
+      "SELECT COALESCE(SUM(minutes_spent), 0) as total_minutes FROM product_work_entries WHERE product_id = ?",
+      [productId]
+    );
+    const totalMinutes = (timeResult.rows[0]?.total_minutes as number) || 0;
+    const settingsResult = await execute("SELECT key, value FROM settings");
+    const s: Record<string, string> = {};
+    for (const row of settingsResult.rows) s[row.key as string] = row.value as string;
+    const hourlyRate = s.hourly_labor_rate ? Number(s.hourly_labor_rate) : 0;
+    const txFeePct = s.transaction_fee_pct ? Number(s.transaction_fee_pct) / 100 : 0;
+    const packagingCost = s.packaging_cost_per_sale ? Number(s.packaging_cost_per_sale) : 0;
+    const shippingCost = s.shipping_cost_per_sale ? Number(s.shipping_cost_per_sale) : 0;
+    const laborCost = (totalMinutes / 60) * hourlyRate;
+    const price = product.price as number | null;
+    const txFee = price ? price * txFeePct : 0;
+    const cashUnitCost = Math.round((materialCost + packagingCost + shippingCost + txFee) * 100) / 100;
+    const fullUnitCost = Math.round((cashUnitCost + laborCost) * 100) / 100;
+    const result: Record<string, unknown> = {
+      product_id: productId, material_cost: Math.round(materialCost * 100) / 100,
+      labor_cost: Math.round(laborCost * 100) / 100, total_minutes: totalMinutes, hourly_rate: hourlyRate,
+      packaging_cost: packagingCost, shipping_cost: shippingCost, transaction_fee: Math.round(txFee * 100) / 100,
+      cash_only: { unit_cost: cashUnitCost },
+      full_cost: { unit_cost: fullUnitCost },
+    };
+    if (price != null && price > 0) {
+      result.price = price;
+      const cashMargin = price - cashUnitCost;
+      const fullMargin = price - fullUnitCost;
+      (result.cash_only as Record<string, unknown>).margin = Math.round(cashMargin * 100) / 100;
+      (result.cash_only as Record<string, unknown>).margin_pct = Math.round((cashMargin / price) * 10000) / 100;
+      (result.full_cost as Record<string, unknown>).margin = Math.round(fullMargin * 100) / 100;
+      (result.full_cost as Record<string, unknown>).margin_pct = Math.round((fullMargin / price) * 10000) / 100;
+    }
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  });
+
+  // ---- Settings ----
+
+  server.registerTool("get_settings", {
+    description: "Get all settings (hourly_labor_rate, default_currency, current_fx_rate, transaction_fee_pct, packaging_cost_per_sale, shipping_cost_per_sale)",
+    inputSchema: {},
+  }, async () => {
+    const result = await execute("SELECT key, value FROM settings ORDER BY key");
+    const settings: Record<string, string> = {};
+    for (const row of result.rows) settings[row.key as string] = row.value as string;
+    return { content: [{ type: "text", text: JSON.stringify(settings, null, 2) }] };
+  });
+
+  server.registerTool("set_setting", {
+    description: "Set a configuration value. Valid keys: default_currency, current_fx_rate, hourly_labor_rate, transaction_fee_pct, packaging_cost_per_sale, shipping_cost_per_sale",
+    inputSchema: {
+      key: z.string().describe("Setting key"),
+      value: z.string().describe("Setting value"),
+    },
+  }, async ({ key, value }) => {
+    const validKeys = ["default_currency", "current_fx_rate", "hourly_labor_rate", "transaction_fee_pct", "packaging_cost_per_sale", "shipping_cost_per_sale"];
+    if (!validKeys.includes(key)) {
+      return { content: [{ type: "text", text: `Error: Invalid key. Valid keys: ${validKeys.join(", ")}` }], isError: true };
+    }
+    await execute(
+      "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+      [key, String(value)]
+    );
+    return { content: [{ type: "text", text: `Set: ${JSON.stringify({ [key]: value }, null, 2)}` }] };
+  });
+
+  // ---- Contributions (Accounting) ----
+
+  server.registerTool("list_contributions", {
+    description: "List all owner capital contributions",
+    inputSchema: {},
+  }, async () => {
+    const result = await execute("SELECT * FROM contributions ORDER BY date DESC");
+    return { content: [{ type: "text", text: JSON.stringify(result.rows, null, 2) }] };
+  });
+
+  server.registerTool("add_contribution", {
+    description: "Record an owner capital contribution. Not revenue or expense — money put into the business.",
+    inputSchema: {
+      amount: z.number().describe("Amount contributed"),
+      currency: z.enum(["ARS", "USD"]).optional().describe("Currency (default ARS)"),
+      date: z.string().optional().describe("Date (YYYY-MM-DD, default today)"),
+      description: z.string().optional().describe("Description"),
+      fx_rate: z.number().optional().describe("ARS per USD exchange rate on the transaction date"),
+    },
+  }, async ({ amount, currency, date, description, fx_rate }) => {
+    if (amount == null) {
+      return { content: [{ type: "text", text: "Error: Amount is required" }], isError: true };
+    }
+    const result = await execute(
+      "INSERT INTO contributions (amount, currency, date, description, fx_rate) VALUES (?, ?, ?, ?, ?)",
+      [amount, currency || "ARS", date || new Date().toISOString().split("T")[0], description || "", fx_rate ?? null]
+    );
+    const row = await execute("SELECT * FROM contributions WHERE id = ?", [result.lastInsertRowid!]);
+    return { content: [{ type: "text", text: `Created: ${JSON.stringify(row.rows[0], null, 2)}` }] };
+  });
+
   // ---- Treasury (Accounting) ----
 
   server.registerTool("get_treasury", {
-    description: "Get treasury summary: total expenses, total sales, and net balance per currency (ARS/USD). Optionally calculate monthly break-even targets.",
+    description: "Get treasury summary: expenses, sales, contributions, net balance per currency, FX-normalized totals, cash position, and break-even analysis (ledger method; contribution margin when BOM data exists). Includes fixed monthly costs, average variable costs, and gap to break-even.",
     inputSchema: {
       months: z.number().optional().describe("Number of months to calculate break-even targets over"),
     },
   }, async ({ months }) => {
-    const expenseResult = await execute(
-      `SELECT
-         COALESCE(SUM(CASE WHEN currency='ARS' THEN amount ELSE 0 END), 0) as ars,
-         COALESCE(SUM(CASE WHEN currency='USD' THEN amount ELSE 0 END), 0) as usd
-       FROM expenses`
+    const { computeTreasury } = await import("@/lib/treasury");
+    const [expenseResult, salesResult, contribResult, settingsResult, productsResult, bomResult, workResult] = await Promise.all([
+      execute("SELECT amount, currency, date, recurrence, is_capital, useful_life_months, fx_rate FROM expenses"),
+      execute("SELECT amount, currency, date, fx_rate, product_id, unit_cost_at_sale FROM sales"),
+      execute("SELECT amount, currency, fx_rate FROM contributions"),
+      execute("SELECT key, value FROM settings"),
+      execute("SELECT id, price, currency FROM products"),
+      execute(
+        `SELECT pm.product_id, SUM(pm.quantity * m.unit_cost) as material_cost
+         FROM product_materials pm JOIN materials m ON m.id = pm.material_id
+         GROUP BY pm.product_id`
+      ),
+      execute(
+        `SELECT product_id, COALESCE(SUM(minutes_spent), 0) as total_minutes
+         FROM product_work_entries GROUP BY product_id`
+      ),
+    ]);
+    const settings: Record<string, string> = {};
+    for (const row of settingsResult.rows) settings[row.key as string] = row.value as string;
+    const expenses = expenseResult.rows.map(r => ({
+      amount: r.amount as number, currency: (r.currency as string) || "ARS",
+      date: (r.date as string) || "", recurrence: (r.recurrence as string) || "none",
+      is_capital: (r.is_capital as number) || 0, useful_life_months: r.useful_life_months as number | null,
+      fx_rate: r.fx_rate as number | null,
+    }));
+    const sales = salesResult.rows.map(r => ({
+      amount: r.amount as number, currency: (r.currency as string) || "ARS",
+      date: (r.date as string) || "", fx_rate: r.fx_rate as number | null,
+      product_id: r.product_id as number | null, unit_cost_at_sale: r.unit_cost_at_sale as number | null,
+    }));
+    const contributions = contribResult.rows.map(r => ({
+      amount: r.amount as number, currency: (r.currency as string) || "ARS", fx_rate: r.fx_rate as number | null,
+    }));
+    const products = productsResult.rows.map(r => ({
+      id: r.id as number, price: r.price as number | null, currency: (r.currency as string) || "ARS",
+    }));
+    const productBoms = bomResult.rows.map(r => ({
+      product_id: r.product_id as number, material_cost: (r.material_cost as number) || 0,
+    }));
+    const productWorkMinutes = workResult.rows.map(r => ({
+      product_id: r.product_id as number, total_minutes: (r.total_minutes as number) || 0,
+    }));
+    const result = computeTreasury(
+      expenses, sales, contributions, settings, new Date(),
+      months ? months : undefined, products, productBoms, productWorkMinutes,
     );
-    const salesResult = await execute(
-      `SELECT
-         COALESCE(SUM(CASE WHEN currency='ARS' THEN amount ELSE 0 END), 0) as ars,
-         COALESCE(SUM(CASE WHEN currency='USD' THEN amount ELSE 0 END), 0) as usd
-       FROM sales`
-    );
-    const expenses = expenseResult.rows[0];
-    const sales = salesResult.rows[0];
-    const net_ars = (sales.ars as number) - (expenses.ars as number);
-    const net_usd = (sales.usd as number) - (expenses.usd as number);
-    const result: Record<string, unknown> = {
-      expenses_ars: expenses.ars, expenses_usd: expenses.usd,
-      sales_ars: sales.ars, sales_usd: sales.usd,
-      net_ars, net_usd,
-    };
-    if (months && months > 0) {
-      result.monthly_target_ars = net_ars < 0 ? Math.abs(net_ars) / months : 0;
-      result.monthly_target_usd = net_usd < 0 ? Math.abs(net_usd) / months : 0;
-      result.months = months;
-    }
     return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
   });
 
