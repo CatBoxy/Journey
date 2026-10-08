@@ -1,13 +1,15 @@
 import { execute } from "@/lib/db";
 import { NextRequest } from "next/server";
+import { QUOTE_SETTING_KEYS } from "@/lib/workshop";
 
-const VALID_KEYS = [
+const VALID_KEYS: string[] = [
   "default_currency",
   "current_fx_rate",
   "hourly_labor_rate",
   "transaction_fee_pct",
   "packaging_cost_per_sale",
   "shipping_cost_per_sale",
+  ...QUOTE_SETTING_KEYS,
 ];
 
 export async function GET() {

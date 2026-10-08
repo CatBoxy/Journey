@@ -2,6 +2,8 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { z } from "zod";
 import { execute, buildPartialUpdate } from "@/lib/db";
+import { registerWorkshopTools } from "@/lib/mcp-workshop-tools";
+import { QUOTE_SETTING_KEYS } from "@/lib/workshop";
 
 function createServer() {
   const server = new McpServer(
@@ -737,7 +739,7 @@ function createServer() {
   // ---- Materials ----
 
   server.registerTool("list_materials", {
-    description: "List all materials with current unit costs",
+    description: "List all materials with stock on hand (stock_qty), weighted average unit cost (unit_cost), and is_metal flag",
     inputSchema: {},
   }, async () => {
     const result = await execute("SELECT * FROM materials ORDER BY name");
@@ -749,18 +751,20 @@ function createServer() {
     inputSchema: {
       name: z.string().describe("Material name"),
       unit: z.enum(["g", "ml", "unit", "cm"]).describe("Unit of measurement"),
-      unit_cost: z.number().describe("Cost per unit"),
+      unit_cost: z.number().optional().describe("Cost per unit. Optional: leave out and log a purchase with record_purchase to set stock and average cost"),
       currency: z.enum(["ARS", "USD"]).optional().describe("Currency (default ARS)"),
       supplier: z.string().optional().describe("Supplier name"),
+      is_metal: z.boolean().optional().describe("True for silver/casting metals: quotes price them at today's replacement price and apply metal loss"),
+      notes: z.string().optional(),
     },
-  }, async ({ name, unit, unit_cost, currency, supplier }) => {
+  }, async ({ name, unit, unit_cost, currency, supplier, is_metal, notes }) => {
     const result = await execute(
-      "INSERT INTO materials (name, unit, unit_cost, currency, supplier) VALUES (?, ?, ?, ?, ?)",
-      [name, unit, unit_cost, currency || "ARS", supplier || ""]
+      "INSERT INTO materials (name, unit, unit_cost, currency, supplier, is_metal, notes) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      [name, unit, unit_cost ?? 0, currency || "ARS", supplier || "", is_metal ? 1 : 0, notes || ""]
     );
     await execute(
       "INSERT INTO material_price_history (material_id, unit_cost, currency) VALUES (?, ?, ?)",
-      [result.lastInsertRowid!, unit_cost, currency || "ARS"]
+      [result.lastInsertRowid!, unit_cost ?? 0, currency || "ARS"]
     );
     const row = await execute("SELECT * FROM materials WHERE id = ?", [result.lastInsertRowid!]);
     return { content: [{ type: "text", text: `Created: ${JSON.stringify(row.rows[0], null, 2)}` }] };
@@ -772,13 +776,16 @@ function createServer() {
       id: z.number().describe("Material ID"),
       name: z.string().optional().describe("Material name"),
       unit: z.enum(["g", "ml", "unit", "cm"]).optional(),
-      unit_cost: z.number().optional().describe("New cost per unit"),
+      unit_cost: z.number().optional().describe("New average cost per unit (normally set by record_purchase)"),
       currency: z.enum(["ARS", "USD"]).optional(),
       supplier: z.string().optional(),
+      is_metal: z.boolean().optional(),
+      notes: z.string().optional(),
     },
-  }, async ({ id, name, unit, unit_cost, currency, supplier }) => {
+  }, async ({ id, name, unit, unit_cost, currency, supplier, is_metal, notes }) => {
     const update = buildPartialUpdate("materials", id, {
-      name, unit, unit_cost, currency, supplier,
+      name, unit, unit_cost, currency, supplier, notes,
+      is_metal: is_metal === undefined ? undefined : is_metal ? 1 : 0,
       updated_at: new Date().toISOString().replace("T", " ").substring(0, 19),
     });
     if (update) await execute(update.sql, update.args);
@@ -890,13 +897,13 @@ function createServer() {
   });
 
   server.registerTool("set_setting", {
-    description: "Set a configuration value. Valid keys: default_currency, current_fx_rate, hourly_labor_rate, transaction_fee_pct, packaging_cost_per_sale, shipping_cost_per_sale",
+    description: `Set a configuration value. Valid keys: default_currency, current_fx_rate, hourly_labor_rate, transaction_fee_pct, packaging_cost_per_sale, shipping_cost_per_sale, ${QUOTE_SETTING_KEYS.join(", ")}. Quote keys: labor_rate_design / labor_rate_bench (ARS per hour), electricity_kwh_price (ARS per kWh), default_*_pct (percent numbers), quote_validity_days, business_name, business_contact.`,
     inputSchema: {
       key: z.string().describe("Setting key"),
       value: z.string().describe("Setting value"),
     },
   }, async ({ key, value }) => {
-    const validKeys = ["default_currency", "current_fx_rate", "hourly_labor_rate", "transaction_fee_pct", "packaging_cost_per_sale", "shipping_cost_per_sale"];
+    const validKeys: string[] = ["default_currency", "current_fx_rate", "hourly_labor_rate", "transaction_fee_pct", "packaging_cost_per_sale", "shipping_cost_per_sale", ...QUOTE_SETTING_KEYS];
     if (!validKeys.includes(key)) {
       return { content: [{ type: "text", text: `Error: Invalid key. Valid keys: ${validKeys.join(", ")}` }], isError: true };
     }
@@ -994,6 +1001,8 @@ function createServer() {
     );
     return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
   });
+
+  registerWorkshopTools(server);
 
   return server;
 }
