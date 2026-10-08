@@ -10,21 +10,21 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   const body = await request.json();
-  const { name, unit, unit_cost, currency, supplier } = body;
-  if (!name || !unit || unit_cost == null) {
-    return Response.json({ error: "name, unit, and unit_cost are required" }, { status: 400 });
+  const { name, unit, unit_cost, currency, supplier, is_metal, notes } = body;
+  if (!name || !unit) {
+    return Response.json({ error: "name and unit are required" }, { status: 400 });
   }
   if (!VALID_UNITS.includes(unit)) {
     return Response.json({ error: `unit must be one of: ${VALID_UNITS.join(", ")}` }, { status: 400 });
   }
   const result = await execute(
-    "INSERT INTO materials (name, unit, unit_cost, currency, supplier) VALUES (?, ?, ?, ?, ?)",
-    [name, unit, unit_cost, currency || "ARS", supplier || ""]
+    "INSERT INTO materials (name, unit, unit_cost, currency, supplier, is_metal, notes) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    [name, unit, unit_cost ?? 0, currency || "ARS", supplier || "", is_metal ? 1 : 0, notes || ""]
   );
   // Record initial price in history
   await execute(
     "INSERT INTO material_price_history (material_id, unit_cost, currency) VALUES (?, ?, ?)",
-    [result.lastInsertRowid!, unit_cost, currency || "ARS"]
+    [result.lastInsertRowid!, unit_cost ?? 0, currency || "ARS"]
   );
   const row = await execute("SELECT * FROM materials WHERE id = ?", [result.lastInsertRowid!]);
   return Response.json(row.rows[0], { status: 201 });
@@ -32,7 +32,7 @@ export async function POST(request: NextRequest) {
 
 export async function PUT(request: NextRequest) {
   const body = await request.json();
-  const { id, name, unit, unit_cost, currency, supplier } = body;
+  const { id, name, unit, unit_cost, currency, supplier, is_metal, notes } = body;
   if (!id) {
     return Response.json({ error: "ID is required" }, { status: 400 });
   }
@@ -40,7 +40,8 @@ export async function PUT(request: NextRequest) {
     return Response.json({ error: `unit must be one of: ${VALID_UNITS.join(", ")}` }, { status: 400 });
   }
   const update = buildPartialUpdate("materials", id, {
-    name, unit, unit_cost, currency, supplier,
+    name, unit, unit_cost, currency, supplier, notes,
+    is_metal: is_metal === undefined ? undefined : is_metal ? 1 : 0,
     updated_at: new Date().toISOString().replace("T", " ").substring(0, 19),
   });
   if (update) await execute(update.sql, update.args);

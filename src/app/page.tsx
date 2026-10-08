@@ -276,15 +276,18 @@ export default function Home() {
               Techniques, projects, equipment & books
             </p>
           </div>
+          <div className="flex items-center gap-4 mt-1">
+          <a href="/workshop" className="text-sm font-medium hover:underline">Workshop</a>
           <button
             onClick={async () => {
               await fetch("/api/auth", { method: "DELETE" });
               window.location.href = "/login";
             }}
-            className="text-sm text-gray-400 hover:text-gray-200 transition-colors mt-1"
+            className="text-sm text-gray-400 hover:text-gray-200 transition-colors"
           >
             Log out
           </button>
+          </div>
         </div>
       </header>
 
